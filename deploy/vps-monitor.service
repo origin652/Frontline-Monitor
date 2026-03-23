@@ -1,0 +1,18 @@
+[Unit]
+Description=Frontline VPS Monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/vps-monitor
+ExecStart=/opt/vps-monitor/vps-monitor -config /etc/vps-monitor/monitor.yaml
+Restart=always
+RestartSec=5
+LimitNOFILE=65535
+EnvironmentFile=-/etc/vps-monitor/env
+
+[Install]
+WantedBy=multi-user.target

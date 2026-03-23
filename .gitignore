@@ -1,0 +1,6 @@
+.cache/
+.modcache/
+data/
+data-local/
+*.db
+*.exe

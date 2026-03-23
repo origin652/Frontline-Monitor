@@ -1,0 +1,141 @@
+{{define "overview"}}
+{{template "shell-start" .}}
+<main class="overview">
+  <section class="situation">
+    <div>
+      <p class="eyebrow">Cluster Situation</p>
+      <h2>域名入口 {{if .Ingress.ActiveNodeID}}挂在 {{.Ingress.ActiveNodeID}}{{else}}等待选定{{end}}</h2>
+    </div>
+    <div class="situation__meta">
+      <div class="situation__metric {{statusClass "healthy"}}">
+        <span>DNS Sync</span>
+        <strong id="ingress-sync">{{if .Ingress.DNSSynced}}SYNCED{{else}}PENDING{{end}}</strong>
+      </div>
+      <div class="situation__metric">
+        <span>Ingress IP</span>
+        <strong id="ingress-ip">{{if .Ingress.DesiredIP}}{{.Ingress.DesiredIP}}{{else}}-{{end}}</strong>
+      </div>
+      <div class="situation__metric">
+        <span>Last DNS</span>
+        <strong>{{if .Ingress.DNSSyncedAt.IsZero}}never{{else}}{{fromNow .Ingress.DNSSyncedAt}}{{end}}</strong>
+      </div>
+    </div>
+  </section>
+
+  <section class="battlefield">
+    <div class="battlefield__nodes">
+      {{range .Nodes}}
+      <article class="node-block {{statusClass .State.Status}}" data-node-card="{{.State.NodeID}}">
+        <div class="node-block__header">
+          <div>
+            <p class="eyebrow">Node {{.State.NodeID}}</p>
+            <h3>{{.State.Status}}</h3>
+          </div>
+          <a href="/nodes/{{.State.NodeID}}" class="node-block__link">进入节点</a>
+        </div>
+        <p class="node-block__reason" data-field="reason">{{.State.Reason}}</p>
+        <div class="node-block__rail">
+          <div>
+            <span>CPU</span>
+            <strong data-field="cpu">{{percent .State.CPUPct}}</strong>
+          </div>
+          <div>
+            <span>MEM</span>
+            <strong data-field="mem">{{percent .State.MemPct}}</strong>
+          </div>
+          <div>
+            <span>DISK</span>
+            <strong data-field="disk">{{percent .State.DiskPct}}</strong>
+          </div>
+          <div>
+            <span>Heartbeat</span>
+            <strong data-field="heartbeat">{{fromNow .State.LastHeartbeatAt}}</strong>
+          </div>
+        </div>
+        <div class="trendline">{{sparkline .Trend}}</div>
+        <div class="node-block__footer">
+          <span>{{.PeerIP}}</span>
+          <span>{{.ServicesBad}} service anomalies</span>
+          <span>{{.State.LastProbeSummary.SuccessfulPeers}} / {{.State.LastProbeSummary.TotalPeers}} peers confirm</span>
+        </div>
+      </article>
+      {{end}}
+    </div>
+
+    <aside class="battlefield__rail">
+      <section class="rail-panel">
+        <div class="rail-panel__header">
+          <div>
+            <p class="eyebrow">Active Incidents</p>
+            <h3>现在最该盯住的东西</h3>
+          </div>
+        </div>
+        <div class="incident-stream" id="incident-stream">
+          {{if .Incidents}}
+            {{range .Incidents}}
+            <article class="incident-item {{statusClass .Severity}}">
+              <div>
+                <p>{{.NodeID}} · {{.RuleKey}}</p>
+                <strong>{{.Summary}}</strong>
+              </div>
+              <span>{{fromNow .OpenedAt}}</span>
+            </article>
+            {{end}}
+          {{else}}
+            <div class="empty-rune">
+              <strong>当前没有活动 incident</strong>
+              <p>这是安静时段，不是空白时段。页面会继续等下一次异常。</p>
+            </div>
+          {{end}}
+        </div>
+      </section>
+      <section class="rail-panel">
+        <div class="rail-panel__header">
+          <div>
+            <p class="eyebrow">Recent Events</p>
+            <h3>集群时间线</h3>
+          </div>
+        </div>
+        <div class="event-stream" id="event-stream">
+          {{range .Events}}
+          <article class="event-item">
+            <div>
+              <span>{{.Kind}}</span>
+              <strong>{{.Title}}</strong>
+              <p>{{truncate .Body 88}}</p>
+            </div>
+            <time>{{fromNow .CreatedAt}}</time>
+          </article>
+          {{else}}
+          <div class="empty-rune">
+            <strong>还没有事件</strong>
+            <p>第一轮 leader 评估完成后，状态流会从这里开始堆起来。</p>
+          </div>
+          {{end}}
+        </div>
+      </section>
+    </aside>
+  </section>
+
+  <section class="matrix-panel">
+    <div class="matrix-panel__header">
+      <p class="eyebrow">Peer Visibility Matrix</p>
+      <h3>节点互探矩阵</h3>
+    </div>
+    <div class="matrix">
+      {{range .ProbeMatrix}}
+      <div class="matrix__row">
+        <div class="matrix__label">{{.Source}}</div>
+        {{range .Cells}}
+        <div class="matrix__cell matrix__cell--{{.Status}}">
+          <span>{{.Target}}</span>
+          <strong>{{.Label}}</strong>
+        </div>
+        {{end}}
+      </div>
+      {{end}}
+    </div>
+  </section>
+</main>
+{{template "shell-end" .}}
+{{end}}

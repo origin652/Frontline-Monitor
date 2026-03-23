@@ -1,0 +1,46 @@
+cluster:
+  node_id: local
+  raft_addr: 127.0.0.1:7000
+  priority: 100
+  peers:
+    - node_id: local
+      api_addr: 127.0.0.1:8443
+      raft_addr: 127.0.0.1:7000
+      public_ipv4: 127.0.0.1
+      priority: 100
+
+network:
+  listen_addr: 127.0.0.1:8443
+  public_ipv4: 127.0.0.1
+  public_https_port: 8443
+
+cloudflare:
+  enabled: false
+
+checks:
+  services: []
+  tcp_ports: []
+  http_checks: []
+  docker_checks: []
+
+thresholds:
+  cpu_warn: 80
+  cpu_crit: 92
+  mem_warn: 85
+  mem_crit: 95
+  disk_warn: 80
+  disk_crit: 92
+
+alerts:
+  telegram:
+    enabled: false
+  smtp:
+    enabled: false
+  wecom_or_feishu:
+    enabled: false
+
+storage:
+  data_dir: ./data-local
+  sqlite_path: ./data-local/monitor.db
+  raft_dir: ./data-local/raft
+  retention_days: 7
