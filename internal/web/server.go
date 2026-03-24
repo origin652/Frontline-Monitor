@@ -2,14 +2,10 @@ package web
 
 import (
 	"context"
-	"embed"
 	"encoding/json"
 	"fmt"
-	"html/template"
 	"io"
-	"io/fs"
 	"log/slog"
-	"math"
 	"net/http"
 	"net/netip"
 	"os"
@@ -17,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	frontendapp "vps-monitor/frontend"
 	"vps-monitor/internal/cluster"
 	"vps-monitor/internal/config"
 	"vps-monitor/internal/model"
@@ -24,49 +21,33 @@ import (
 	"vps-monitor/internal/store"
 )
 
-//go:embed templates/*.gohtml static/*
-var assets embed.FS
-
 type Server struct {
 	cfg       *config.Config
 	store     *store.Store
 	cluster   *cluster.Manager
 	notifiers []notify.Notifier
 	logger    *slog.Logger
-	templates *template.Template
 }
 
 func New(cfg *config.Config, st *store.Store, cl *cluster.Manager, notifiers []notify.Notifier, logger *slog.Logger) (*Server, error) {
-	tpl, err := template.New("base").Funcs(template.FuncMap{
-		"formatTime":  formatTime,
-		"fromNow":     fromNow,
-		"statusClass": statusClass,
-		"percent":     percent,
-		"sparkline":   sparkline,
-		"truncate":    truncate,
-	}).ParseFS(assets, "templates/*.gohtml")
-	if err != nil {
-		return nil, err
-	}
 	return &Server{
 		cfg:       cfg,
 		store:     st,
 		cluster:   cl,
 		notifiers: notifiers,
 		logger:    logger,
-		templates: tpl,
 	}, nil
 }
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	staticFS, _ := fs.Sub(assets, "static")
-	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
+	mux.Handle("GET /frontend/", http.StripPrefix("/frontend/", http.FileServer(http.FS(frontendapp.Assets))))
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
-	mux.HandleFunc("GET /", s.handleOverviewPage)
-	mux.HandleFunc("GET /nodes/{nodeID}", s.handleNodePage)
-	mux.HandleFunc("GET /events", s.handleEventsPage)
+	mux.HandleFunc("GET /", s.handleFrontendApp)
+	mux.HandleFunc("GET /nodes/{nodeID}", s.handleFrontendApp)
+	mux.HandleFunc("GET /events", s.handleFrontendApp)
 	mux.HandleFunc("GET /api/v1/cluster", s.handleClusterAPI)
+	mux.HandleFunc("GET /api/v1/meta", s.handleMetaAPI)
 	mux.HandleFunc("GET /api/v1/nodes", s.handleNodesAPI)
 	mux.HandleFunc("GET /api/v1/nodes/{nodeID}", s.handleNodeAPI)
 	mux.HandleFunc("GET /api/v1/ingress", s.handleIngressAPI)
@@ -77,6 +58,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /internal/v1/observations/heartbeat", s.handleInternalHeartbeat)
 	mux.HandleFunc("POST /internal/v1/observations/probe", s.handleInternalProbe)
 	return mux
+}
+
+func (s *Server) handleFrontendApp(w http.ResponseWriter, r *http.Request) {
+	content, err := frontendapp.Assets.ReadFile("index.html")
+	if err != nil {
+		s.renderError(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write(content)
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
@@ -99,40 +90,6 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, status, payload)
 }
 
-func (s *Server) handleOverviewPage(w http.ResponseWriter, r *http.Request) {
-	view, err := s.buildOverviewView(r.Context())
-	if err != nil {
-		s.renderError(w, http.StatusInternalServerError, err)
-		return
-	}
-	if err := s.templates.ExecuteTemplate(w, "overview", view); err != nil {
-		s.renderError(w, http.StatusInternalServerError, err)
-	}
-}
-
-func (s *Server) handleNodePage(w http.ResponseWriter, r *http.Request) {
-	nodeID := r.PathValue("nodeID")
-	view, err := s.buildNodeView(r.Context(), nodeID)
-	if err != nil {
-		s.renderError(w, http.StatusInternalServerError, err)
-		return
-	}
-	if err := s.templates.ExecuteTemplate(w, "node", view); err != nil {
-		s.renderError(w, http.StatusInternalServerError, err)
-	}
-}
-
-func (s *Server) handleEventsPage(w http.ResponseWriter, r *http.Request) {
-	view, err := s.buildEventsView(r.Context())
-	if err != nil {
-		s.renderError(w, http.StatusInternalServerError, err)
-		return
-	}
-	if err := s.templates.ExecuteTemplate(w, "events", view); err != nil {
-		s.renderError(w, http.StatusInternalServerError, err)
-	}
-}
-
 func (s *Server) handleClusterAPI(w http.ResponseWriter, r *http.Request) {
 	snapshot, err := s.snapshot(r.Context())
 	if err != nil {
@@ -140,6 +97,15 @@ func (s *Server) handleClusterAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, snapshot)
+}
+
+func (s *Server) handleMetaAPI(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"node_id":                   s.cfg.Cluster.NodeID,
+		"leader_id":                 s.cluster.LeaderID(),
+		"test_alert_channels":       s.enabledAlertChannels(),
+		"test_alert_requires_token": strings.TrimSpace(os.Getenv("MONITOR_TEST_ALERT_TOKEN")) != "",
+	})
 }
 
 func (s *Server) handleNodesAPI(w http.ResponseWriter, r *http.Request) {
@@ -392,84 +358,11 @@ func subtleCompare(a, b string) bool {
 	return diff == 0
 }
 
-func formatTime(t time.Time) string {
-	if t.IsZero() {
-		return "never"
-	}
-	return t.Local().Format("2006-01-02 15:04:05")
-}
-
-func fromNow(t time.Time) string {
-	if t.IsZero() {
-		return "no signal"
-	}
-	diff := time.Since(t)
-	if diff < 0 {
-		diff = -diff
-	}
-	switch {
-	case diff < time.Minute:
-		return fmt.Sprintf("%ds ago", int(diff.Seconds()))
-	case diff < time.Hour:
-		return fmt.Sprintf("%dm ago", int(diff.Minutes()))
-	default:
-		return fmt.Sprintf("%dh ago", int(diff.Hours()))
-	}
-}
-
-func statusClass(status string) string {
-	switch status {
-	case model.StatusHealthy:
-		return "tone-ok"
-	case model.StatusDegraded:
-		return "tone-warn"
-	case model.StatusCritical:
-		return "tone-bad"
-	default:
-		return "tone-unknown"
-	}
-}
-
-func percent(value float64) string {
-	return fmt.Sprintf("%.0f%%", value)
-}
-
 func truncate(value string, limit int) string {
 	if len(value) <= limit {
 		return value
 	}
 	return value[:limit] + "..."
-}
-
-func sparkline(points []model.MetricPoint) template.HTML {
-	if len(points) == 0 {
-		return template.HTML(`<svg viewBox="0 0 100 24" preserveAspectRatio="none"><path d="M0 20 L100 20" /></svg>`)
-	}
-	maxValue := 0.0
-	for _, point := range points {
-		maxValue = math.Max(maxValue, point.Value)
-	}
-	if maxValue == 0 {
-		maxValue = 1
-	}
-	var path strings.Builder
-	for i, point := range points {
-		x := float64(i) / float64(max(1, len(points)-1)) * 100
-		y := 22 - (point.Value/maxValue)*20
-		if i == 0 {
-			path.WriteString(fmt.Sprintf("M%.2f %.2f", x, y))
-		} else {
-			path.WriteString(fmt.Sprintf(" L%.2f %.2f", x, y))
-		}
-	}
-	return template.HTML(fmt.Sprintf(`<svg viewBox="0 0 100 24" preserveAspectRatio="none"><path d="%s" /></svg>`, path.String()))
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 func parseLimit(raw string, fallback int) int {

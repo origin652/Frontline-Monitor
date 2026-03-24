@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Frontline Monitor</title>
+  <script>
+    (function () {
+      try {
+        document.documentElement.dataset.theme = localStorage.getItem("vps-monitor-theme") || "graphite";
+      } catch (error) {
+        document.documentElement.dataset.theme = "graphite";
+      }
+    })();
+  </script>
+  <link rel="stylesheet" href="/frontend/styles.css">
+</head>
+<body data-default-theme="graphite">
+  <div class="atmosphere"></div>
+  <div class="gridfield"></div>
+  <div id="app"></div>
+  <script src="/frontend/app.js" defer></script>
+</body>
+</html>

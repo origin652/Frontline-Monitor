@@ -6,7 +6,7 @@
 - `hashicorp/raft` 自动选主
 - SQLite 本地物化视图
 - Cloudflare Free 固定域名接入
-- Go 原生 SSR 仪表盘
+- 同仓前后端分离仪表盘
 
 ## 主要能力
 
@@ -19,11 +19,12 @@
 ## 项目结构
 
 - `cmd/vps-monitor`: 启动入口
+- `frontend`: 独立前端入口（同仓 SPA）
 - `internal/config`: 配置加载和校验
 - `internal/cluster`: Raft、FSM 和 leader 提交
 - `internal/monitor`: 采集器与互探器
 - `internal/engine`: 状态判定、incident、告警和 DNS 控制
-- `internal/web`: HTML 模板、静态资源和 API
+- `internal/web`: API、静态前端分发和内部写入接口
 
 ## 本地开发
 
@@ -57,7 +58,13 @@ vps-monitor.exe -config monitor.local.yaml
 - `http://127.0.0.1:8443/healthz`
 - `http://127.0.0.1:8443/api/v1/cluster`
 
-`monitor.local.yaml` 关闭了 Cloudflare、告警、systemd 和 Docker 检查，并启用单节点本地模式，适合先验证页面、API、Raft 自举和本机采集是否正常。
+`monitor.local.yaml` 关闭了 Cloudflare、告警、systemd 和 Docker 检查，并启用单节点本地模式，适合先验证前端页面、API、Raft 自举和本机采集是否正常。
+
+## 前端结构
+
+- 浏览器访问 `/`、`/events`、`/nodes/{nodeID}` 时，后端统一返回 `frontend/index.html`
+- 前端自己通过 `/api/v1/*` 拉取数据并渲染页面
+- `GET /api/v1/meta` 提供前端所需的轻量运行时元信息，例如测试告警渠道与 token 要求
 
 ## 测试告警
 
