@@ -1078,6 +1078,35 @@ body {
   text-transform: none;
 }
 
+.obs-sidebar__filing {
+  display: block;
+}
+
+.obs-filing-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  letter-spacing: 0;
+  text-transform: none;
+  text-decoration: none;
+  transition: color 180ms ease, opacity 180ms ease;
+}
+
+.obs-filing-link:hover,
+.obs-filing-link:focus-visible {
+  color: var(--accent);
+}
+
+.obs-main__footer {
+  display: flex;
+  justify-content: center;
+  margin-top: 1.25rem;
+  padding-top: 0.9rem;
+}
+
 .obs-sidebar__status-item strong,
 .obs-topbar__operator strong,
 .obs-hero__fact strong {
@@ -2014,6 +2043,13 @@ body {
   .obs-main {
     margin-left: 0;
     padding: 1rem 1rem calc(2rem + env(safe-area-inset-bottom));
+  }
+
+  .obs-main__footer {
+    margin-top: 1rem;
+    padding-top: 0.75rem;
+    padding-bottom: calc(0.35rem + env(safe-area-inset-bottom));
+    justify-content: flex-start;
   }
 
   .obs-sidebar-toggle,

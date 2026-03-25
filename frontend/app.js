@@ -1862,6 +1862,7 @@
       ? contextNodeName
       : sidebarContextLabel(view.page);
     const adminLabel = activeMeta.is_admin ? "Admin" : "Login";
+    const filingLink = '<a class="obs-filing-link" href="https://icp.gov.moe/?keyword=20268668" target="_blank" rel="noopener noreferrer">萌ICP备20268668号</a>';
 
     return `
       <div class="obs-shell">
@@ -1905,6 +1906,7 @@
             <div class="obs-sidebar__links">
               <span>Self-hosted control console</span>
               <span>${escapeHTML(formatDateTime(view.generatedAt))}</span>
+              <span class="obs-sidebar__filing">${filingLink}</span>
             </div>
             <div class="obs-sidebar__mobile-tools">
               <label class="obs-theme-switcher obs-theme-switcher--drawer">
@@ -1977,6 +1979,9 @@
 
         <div class="obs-main">
           ${view.content}
+          <footer class="obs-main__footer">
+            ${filingLink}
+          </footer>
         </div>
       </div>
     `;
