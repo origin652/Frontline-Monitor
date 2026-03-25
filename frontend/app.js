@@ -222,7 +222,9 @@
       "已恢复默认名称。": "Default name restored.",
       "恢复默认名称失败": "Failed to restore default name",
       "无法读取检测项内容。": "Unable to read check data.",
+      "检测项不存在或已刷新。": "The check no longer exists or the page has refreshed.",
       "无法读取节点名称内容。": "Unable to read node name data.",
+      "节点映射不存在或已刷新。": "The node mapping no longer exists or the page has refreshed.",
       "正在发送测试告警...": "Sending test alert...",
       "发送时间 ": "Sent at ",
       "留空则恢复默认名称": "Leave empty to restore the default name",
@@ -242,6 +244,8 @@
   let searchPanelOpen = false;
   let sidebarDrawerOpen = false;
   let activeMeta = {};
+  let currentAdminChecks = [];
+  let currentAdminNodes = [];
 
   document.addEventListener("click", handleDocumentClick);
   document.addEventListener("change", handleDocumentChange);
@@ -460,7 +464,7 @@
   function handleAdminAction(button) {
     const action = button.dataset.adminAction || "";
     if (action === "edit-check") {
-      fillAdminCheckForm(button.dataset.check || "");
+      fillAdminCheckForm(button.dataset.checkId || "");
       return;
     }
     if (action === "clear-check-form") {
@@ -472,7 +476,7 @@
       return;
     }
     if (action === "edit-node-name") {
-      fillAdminNodeNameForm(button.dataset.node || "");
+      fillAdminNodeNameForm(button.dataset.nodeId || "");
       return;
     }
     if (action === "clear-node-form") {
@@ -482,6 +486,50 @@
     if (action === "reset-node-name") {
       deleteAdminNodeName(button.dataset.nodeId || "");
     }
+  }
+
+  function bindDirectFormSubmit(formID, handler) {
+    const form = document.getElementById(formID);
+    if (!form || form.dataset.boundSubmit === "true") {
+      return;
+    }
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      await handler(form, event);
+    });
+    form.dataset.boundSubmit = "true";
+  }
+
+  function bindPageFormHandlers() {
+    bindDirectFormSubmit("test-alert-form", async (form) => {
+      try {
+        await submitTestAlert(form);
+      } catch (error) {
+        const result = document.getElementById("test-alert-result");
+        if (result) {
+          result.innerHTML = '<p>' + escapeHTML(error.message || "发送失败") + "</p>";
+        }
+      }
+    });
+    bindDirectFormSubmit("admin-bootstrap-form", async (form) => {
+      await submitAdminBootstrap(form);
+    });
+    bindDirectFormSubmit("admin-login-form", async (form) => {
+      await submitAdminLogin(form);
+    });
+    bindDirectFormSubmit("admin-logout-form", async () => {
+      await submitAdminLogout();
+    });
+    bindDirectFormSubmit("admin-password-form", async (form) => {
+      await submitAdminPassword(form);
+    });
+    bindDirectFormSubmit("admin-check-form", async (form) => {
+      await submitAdminCheck(form);
+    });
+    bindDirectFormSubmit("admin-node-name-form", async (form) => {
+      await submitAdminNodeName(form);
+    });
   }
 
   async function renderRoute(options) {
@@ -531,6 +579,7 @@
       syncThemeSelect();
       syncLanguageSelect();
       syncSearchUI();
+      bindPageFormHandlers();
       syncAdminCheckForm();
       syncSidebarDrawer();
       scheduleRefresh();
@@ -558,6 +607,7 @@
         content: renderStatePanel("加载失败", error.message || "接口请求失败。", route)
       }));
       lastRouteKey = routeKey;
+      bindPageFormHandlers();
       syncThemeSelect();
       syncLanguageSelect();
       syncSearchUI();
@@ -582,6 +632,11 @@
   function scheduleRefresh() {
     window.clearTimeout(refreshTimer);
     refreshTimer = window.setTimeout(() => {
+      if (resolveRoute(window.location.pathname).page === "admin") {
+        scheduleRefresh();
+        return;
+      }
+
       if (document.activeElement && document.activeElement.matches("[data-global-search]")) {
         scheduleRefresh();
         return;
@@ -847,6 +902,8 @@
         fetchJSON("/api/v1/admin/nodes").catch(() => [])
       ]);
     }
+    currentAdminChecks = Array.isArray(checks) ? checks : [];
+    currentAdminNodes = Array.isArray(nodes) ? nodes : [];
 
     return {
       page: "admin",
@@ -1412,7 +1469,6 @@
   }
 
   function renderAdminCheckRow(check) {
-    const encoded = encodeURIComponent(JSON.stringify(check || {}));
     return `
       <article class="service-row status-surface admin-check-row" data-status="${check.enabled ? "healthy" : "unknown"}">
         <div class="admin-check-row__head">
@@ -1421,7 +1477,7 @@
             <span>${escapeHTML((check.type || "check") + " · " + adminCheckEnabledLabel(check.enabled !== false))}</span>
           </div>
           <div class="admin-check-row__actions">
-            <button type="button" class="admin-button admin-button--secondary" data-admin-action="edit-check" data-check="${escapeHTML(encoded)}">编辑</button>
+            <button type="button" class="admin-button admin-button--secondary" data-admin-action="edit-check" data-check-id="${escapeHTML(check.id || "")}">编辑</button>
             <button type="button" class="admin-button admin-button--danger" data-admin-action="delete-check" data-check-id="${escapeHTML(check.id || "")}">删除</button>
           </div>
         </div>
@@ -1431,7 +1487,6 @@
   }
 
   function renderAdminNodeNameRow(node) {
-    const encoded = encodeURIComponent(JSON.stringify(node || {}));
     return `
       <article class="service-row status-surface admin-check-row" data-status="healthy">
         <div class="admin-check-row__head">
@@ -1440,7 +1495,7 @@
             <span>${escapeHTML(node.node_id || "-")}</span>
           </div>
           <div class="admin-check-row__actions">
-            <button type="button" class="admin-button admin-button--secondary" data-admin-action="edit-node-name" data-node="${escapeHTML(encoded)}">编辑</button>
+            <button type="button" class="admin-button admin-button--secondary" data-admin-action="edit-node-name" data-node-id="${escapeHTML(node.node_id || "")}">编辑</button>
             ${node.display_name
               ? `<button type="button" class="admin-button admin-button--secondary" data-admin-action="reset-node-name" data-node-id="${escapeHTML(node.node_id || "")}">恢复默认</button>`
               : ""}
@@ -3491,16 +3546,14 @@
     }
   }
 
-  function fillAdminCheckForm(encoded) {
+  function fillAdminCheckForm(checkID) {
     const form = document.getElementById("admin-check-form");
-    if (!form || !encoded) {
+    if (!form || !checkID) {
       return;
     }
-    let check = {};
-    try {
-      check = JSON.parse(decodeURIComponent(encoded));
-    } catch (error) {
-      setAdminCheckNotice("无法读取检测项内容。", true);
+    const check = currentAdminChecks.find((item) => String(item && item.id || "") === String(checkID));
+    if (!check) {
+      setAdminCheckNotice("检测项不存在或已刷新。", true);
       return;
     }
     setFieldValue(form, "id", check.id || "");
@@ -3522,16 +3575,14 @@
     form.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
-  function fillAdminNodeNameForm(encoded) {
+  function fillAdminNodeNameForm(nodeID) {
     const form = document.getElementById("admin-node-name-form");
-    if (!form || !encoded) {
+    if (!form || !nodeID) {
       return;
     }
-    let node = {};
-    try {
-      node = JSON.parse(decodeURIComponent(encoded));
-    } catch (error) {
-      setAdminNodeNotice("无法读取节点名称内容。", true);
+    const node = currentAdminNodes.find((item) => String(item && item.node_id || "") === String(nodeID));
+    if (!node) {
+      setAdminNodeNotice("节点映射不存在或已刷新。", true);
       return;
     }
     setFieldValue(form, "node_id", node.node_id || "");
