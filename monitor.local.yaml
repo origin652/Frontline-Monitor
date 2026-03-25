@@ -1,6 +1,7 @@
 cluster:
   node_id: local
   raft_addr: 127.0.0.1:7000
+  raft_bind_addr: 127.0.0.1:7000
   priority: 100
   peers:
     - node_id: local

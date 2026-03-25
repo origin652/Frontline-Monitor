@@ -95,7 +95,10 @@ vps-monitor.exe -config monitor.local.yaml
 说明：
 
 - `cluster.peers` 需要在三台机器上保持一致，并且必须包含三台节点的 `node_id / api_addr / raft_addr / public_ipv4`
+- `cluster.raft_bind_addr` 是可选字段；未设置时默认回退到 `cluster.raft_addr`。如果节点在 NAT 后面，或者想让 Raft 监听 `0.0.0.0:7000` 但对外广播另一地址，就把 bind 写在这里
 - `cluster.peers[].display_name` 是可选字段，只影响页面和 API 展示名称，不影响 `node_id`、Raft 身份或路由
+- `cluster.peers[].ingress_candidate` 是可选字段，默认 `true`。设成 `false` 后，该节点仍然参与 Raft、可以当 leader、也继续做监控，只是不再参与 ingress 入口节点选择
+- 如果某台机器的 `443` 已经被 Xray/VLESS+Reality 等服务占用，可以把它的 `ingress_candidate` 设为 `false`，这样它还能留在集群里，但不会被选成 `monitor.example.com` 的 HTTPS 入口
 - 管理后台可以在运行时覆盖节点显示名称；覆盖值优先于 `monitor.yaml` 里的 `display_name`
 - 如果某台机器没有 `nginx` 或 `docker`，把它从 `checks.services` / `checks.docker_checks` 里删掉，否则会长期显示 `degraded`
 - 如果暂时不接 Cloudflare，把 `cloudflare.enabled` 设为 `false`

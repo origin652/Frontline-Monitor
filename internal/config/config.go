@@ -23,19 +23,21 @@ type Config struct {
 }
 
 type ClusterConfig struct {
-	NodeID   string        `yaml:"node_id"`
-	RaftAddr string        `yaml:"raft_addr"`
-	Peers    []ClusterPeer `yaml:"peers"`
-	Priority int           `yaml:"priority"`
+	NodeID       string        `yaml:"node_id"`
+	RaftAddr     string        `yaml:"raft_addr"`
+	RaftBindAddr string        `yaml:"raft_bind_addr"`
+	Peers        []ClusterPeer `yaml:"peers"`
+	Priority     int           `yaml:"priority"`
 }
 
 type ClusterPeer struct {
-	NodeID      string `yaml:"node_id"`
-	DisplayName string `yaml:"display_name"`
-	APIAddr     string `yaml:"api_addr"`
-	RaftAddr    string `yaml:"raft_addr"`
-	PublicIPv4  string `yaml:"public_ipv4"`
-	Priority    int    `yaml:"priority"`
+	NodeID           string `yaml:"node_id"`
+	DisplayName      string `yaml:"display_name"`
+	APIAddr          string `yaml:"api_addr"`
+	RaftAddr         string `yaml:"raft_addr"`
+	PublicIPv4       string `yaml:"public_ipv4"`
+	Priority         int    `yaml:"priority"`
+	IngressCandidate *bool  `yaml:"ingress_candidate"`
 }
 
 type NetworkConfig struct {
@@ -238,6 +240,13 @@ func (c *Config) SelfPeer() ClusterPeer {
 	}
 }
 
+func (c *Config) RaftBindAddr() string {
+	if bind := strings.TrimSpace(c.Cluster.RaftBindAddr); bind != "" {
+		return bind
+	}
+	return strings.TrimSpace(c.Cluster.RaftAddr)
+}
+
 func (c *Config) PeerByID(nodeID string) (ClusterPeer, bool) {
 	for _, peer := range c.Cluster.Peers {
 		if peer.NodeID == nodeID {
@@ -313,4 +322,11 @@ func (p ClusterPeer) DisplayNameOrNodeID() string {
 		return strings.TrimSpace(p.DisplayName)
 	}
 	return p.NodeID
+}
+
+func (p ClusterPeer) IsIngressCandidate() bool {
+	if p.IngressCandidate == nil {
+		return true
+	}
+	return *p.IngressCandidate
 }

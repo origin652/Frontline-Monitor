@@ -475,34 +475,7 @@ func (e *Engine) syncIngress(ctx context.Context, now time.Time) error {
 		return err
 	}
 
-	eligible := make([]model.NodeState, 0, len(states))
-	for _, state := range states {
-		if state.Status == model.StatusHealthy || (state.Status == model.StatusDegraded && state.RuleKey != "availability") {
-			if state.LastProbeSummary.Reachable || state.NodeID == e.cfg.Cluster.NodeID {
-				eligible = append(eligible, state)
-			}
-		}
-	}
-	if len(eligible) == 0 {
-		return nil
-	}
-
-	slices.SortFunc(eligible, func(a, b model.NodeState) int {
-		peerA, _ := e.cfg.PeerByID(a.NodeID)
-		peerB, _ := e.cfg.PeerByID(b.NodeID)
-		if peerA.Priority != peerB.Priority {
-			return peerB.Priority - peerA.Priority
-		}
-		if current != nil && a.NodeID == current.ActiveNodeID {
-			return -1
-		}
-		if current != nil && b.NodeID == current.ActiveNodeID {
-			return 1
-		}
-		return strings.Compare(a.NodeID, b.NodeID)
-	})
-
-	targetPeer, ok := e.cfg.PeerByID(eligible[0].NodeID)
+	targetPeer, ok := selectIngressTargetPeer(e.cfg, states, current)
 	if !ok {
 		return nil
 	}
@@ -572,4 +545,51 @@ func (e *Engine) syncIngress(ctx context.Context, now time.Time) error {
 		},
 	})
 	return err
+}
+
+type ingressTargetCandidate struct {
+	state model.NodeState
+	peer  config.ClusterPeer
+}
+
+func selectIngressTargetPeer(cfg *config.Config, states []model.NodeState, current *model.IngressState) (config.ClusterPeer, bool) {
+	eligible := make([]ingressTargetCandidate, 0, len(states))
+	for _, state := range states {
+		if !isIngressStateEligible(cfg, state) {
+			continue
+		}
+		peer, ok := cfg.PeerByID(state.NodeID)
+		if !ok || !peer.IsIngressCandidate() {
+			continue
+		}
+		eligible = append(eligible, ingressTargetCandidate{
+			state: state,
+			peer:  peer,
+		})
+	}
+	if len(eligible) == 0 {
+		return config.ClusterPeer{}, false
+	}
+
+	slices.SortFunc(eligible, func(a, b ingressTargetCandidate) int {
+		if a.peer.Priority != b.peer.Priority {
+			return b.peer.Priority - a.peer.Priority
+		}
+		if current != nil && a.state.NodeID == current.ActiveNodeID {
+			return -1
+		}
+		if current != nil && b.state.NodeID == current.ActiveNodeID {
+			return 1
+		}
+		return strings.Compare(a.state.NodeID, b.state.NodeID)
+	})
+
+	return eligible[0].peer, true
+}
+
+func isIngressStateEligible(cfg *config.Config, state model.NodeState) bool {
+	if state.Status != model.StatusHealthy && (state.Status != model.StatusDegraded || state.RuleKey == "availability") {
+		return false
+	}
+	return state.LastProbeSummary.Reachable || state.NodeID == cfg.Cluster.NodeID
 }

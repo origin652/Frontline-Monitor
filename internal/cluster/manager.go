@@ -58,7 +58,7 @@ func NewManager(cfg *config.Config, st *store.Store, logger *slog.Logger) (*Mana
 	if err != nil {
 		return nil, fmt.Errorf("resolve raft addr: %w", err)
 	}
-	transport, err := raft.NewTCPTransport(cfg.Cluster.RaftAddr, addr, 3, 10*time.Second, io.Discard)
+	transport, err := raft.NewTCPTransport(cfg.RaftBindAddr(), addr, 3, 10*time.Second, io.Discard)
 	if err != nil {
 		return nil, fmt.Errorf("create raft transport: %w", err)
 	}
