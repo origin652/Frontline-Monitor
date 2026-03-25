@@ -94,8 +94,6 @@
       "View": "视图",
       "Incident": "事件",
       "Event": "事件流",
-      "enabled": "启用",
-      "disabled": "禁用",
       "administrator already initialized": "管理员已经初始化",
       "administrator is not initialized": "管理员尚未初始化",
       "invalid password": "密码错误",
@@ -1420,7 +1418,7 @@
         <div class="admin-check-row__head">
           <div>
             <strong>${escapeHTML(check.name || check.type || "check")}</strong>
-            <span>${escapeHTML((check.type || "check") + (check.enabled ? " · enabled" : " · disabled"))}</span>
+            <span>${escapeHTML((check.type || "check") + " · " + adminCheckEnabledLabel(check.enabled !== false))}</span>
           </div>
           <div class="admin-check-row__actions">
             <button type="button" class="admin-button admin-button--secondary" data-admin-action="edit-check" data-check="${escapeHTML(encoded)}">编辑</button>
@@ -1457,6 +1455,12 @@
     const effective = node && node.effective_display_name ? node.effective_display_name : nodeLabelFrom("", node && node.node_id);
     const nodeID = node && node.node_id ? node.node_id : "-";
     return effective === nodeID ? nodeID : effective + " (" + nodeID + ")";
+  }
+
+  function adminCheckEnabledLabel(enabled) {
+    return getCurrentLanguage() === "en"
+      ? (enabled ? "enabled" : "disabled")
+      : (enabled ? "启用" : "禁用");
   }
 
   function describeAdminNodeName(node) {
