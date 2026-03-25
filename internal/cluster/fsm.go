@@ -21,6 +21,13 @@ const (
 	CommandIngress         = "ingress"
 	CommandAlertClaim      = "alert_claim"
 	CommandAlertCompletion = "alert_completion"
+	CommandAdminSettings   = "admin_settings"
+	CommandAdminSession    = "admin_session"
+	CommandDeleteSession   = "delete_session"
+	CommandMonitorCheck    = "monitor_check"
+	CommandDeleteCheck     = "delete_check"
+	CommandNodeDisplayName = "node_display_name"
+	CommandDeleteNodeName  = "delete_node_display_name"
 )
 
 type commandEnvelope struct {
@@ -126,6 +133,68 @@ func (f *FSM) Apply(logEntry *raft.Log) any {
 			if err := f.store.UpdateIncidentLastNotified(ctx, completion.IncidentID, completion.SentAt); err != nil {
 				return CommandResult{Error: err.Error()}
 			}
+		}
+	case CommandAdminSettings:
+		var settings model.AdminSettings
+		if err := json.Unmarshal(env.Payload, &settings); err != nil {
+			return CommandResult{Error: err.Error()}
+		}
+		if err := f.store.UpsertAdminSettings(ctx, settings); err != nil {
+			return CommandResult{Error: err.Error()}
+		}
+	case CommandAdminSession:
+		var session model.AdminSession
+		if err := json.Unmarshal(env.Payload, &session); err != nil {
+			return CommandResult{Error: err.Error()}
+		}
+		if err := f.store.UpsertAdminSession(ctx, session); err != nil {
+			return CommandResult{Error: err.Error()}
+		}
+	case CommandDeleteSession:
+		var payload struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(env.Payload, &payload); err != nil {
+			return CommandResult{Error: err.Error()}
+		}
+		if err := f.store.DeleteAdminSession(ctx, payload.ID); err != nil {
+			return CommandResult{Error: err.Error()}
+		}
+	case CommandMonitorCheck:
+		var check model.MonitorCheck
+		if err := json.Unmarshal(env.Payload, &check); err != nil {
+			return CommandResult{Error: err.Error()}
+		}
+		if err := f.store.UpsertMonitorCheck(ctx, check); err != nil {
+			return CommandResult{Error: err.Error()}
+		}
+	case CommandDeleteCheck:
+		var payload struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(env.Payload, &payload); err != nil {
+			return CommandResult{Error: err.Error()}
+		}
+		if err := f.store.DeleteMonitorCheck(ctx, payload.ID); err != nil {
+			return CommandResult{Error: err.Error()}
+		}
+	case CommandNodeDisplayName:
+		var item model.NodeDisplayName
+		if err := json.Unmarshal(env.Payload, &item); err != nil {
+			return CommandResult{Error: err.Error()}
+		}
+		if err := f.store.UpsertNodeDisplayName(ctx, item); err != nil {
+			return CommandResult{Error: err.Error()}
+		}
+	case CommandDeleteNodeName:
+		var payload struct {
+			NodeID string `json:"node_id"`
+		}
+		if err := json.Unmarshal(env.Payload, &payload); err != nil {
+			return CommandResult{Error: err.Error()}
+		}
+		if err := f.store.DeleteNodeDisplayName(ctx, payload.NodeID); err != nil {
+			return CommandResult{Error: err.Error()}
 		}
 	default:
 		return CommandResult{Error: fmt.Sprintf("unknown command type %q", env.Type)}

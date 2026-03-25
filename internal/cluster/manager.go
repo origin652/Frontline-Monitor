@@ -26,6 +26,7 @@ type Manager struct {
 	logger            *slog.Logger
 	leaderTransitions chan bool
 	isLeader          atomic.Bool
+	closers           []io.Closer
 }
 
 func NewManager(cfg *config.Config, st *store.Store, logger *slog.Logger) (*Manager, error) {
@@ -74,6 +75,7 @@ func NewManager(cfg *config.Config, st *store.Store, logger *slog.Logger) (*Mana
 		raft:              nodeRaft,
 		logger:            logger,
 		leaderTransitions: notifyCh,
+		closers:           []io.Closer{logStore, stableStore, transport},
 	}
 	manager.watchLeadership()
 
@@ -139,14 +141,18 @@ func (m *Manager) LeaderAPIAddr() string {
 }
 
 func (m *Manager) Apply(ctx context.Context, cmdType string, payload any) (any, error) {
-	if !m.IsLeader() {
-		return nil, raft.ErrNotLeader
-	}
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("marshal command payload: %w", err)
 	}
-	data, err := json.Marshal(commandEnvelope{Type: cmdType, Payload: payloadBytes})
+	return m.ApplyRaw(ctx, cmdType, payloadBytes)
+}
+
+func (m *Manager) ApplyRaw(ctx context.Context, cmdType string, payload json.RawMessage) (any, error) {
+	if !m.IsLeader() {
+		return nil, raft.ErrNotLeader
+	}
+	data, err := json.Marshal(commandEnvelope{Type: cmdType, Payload: payload})
 	if err != nil {
 		return nil, fmt.Errorf("marshal command envelope: %w", err)
 	}
@@ -177,6 +183,18 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	case err := <-done:
-		return err
+		var closeErr error
+		for _, closer := range m.closers {
+			if closer == nil {
+				continue
+			}
+			if err := closer.Close(); err != nil && closeErr == nil {
+				closeErr = err
+			}
+		}
+		if err != nil {
+			return err
+		}
+		return closeErr
 	}
 }

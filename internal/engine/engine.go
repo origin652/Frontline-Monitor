@@ -58,6 +58,9 @@ func (e *Engine) tick(ctx context.Context) {
 		return
 	}
 	now := time.Now().UTC()
+	if err := e.ensureMonitorChecksSeeded(ctx, now); err != nil {
+		e.logger.Error("seed runtime monitor checks failed", "error", err)
+	}
 	for _, peer := range e.cfg.Cluster.Peers {
 		if err := e.evaluateNode(ctx, peer.NodeID, now); err != nil {
 			e.logger.Error("evaluate node failed", "node_id", peer.NodeID, "error", err)
@@ -66,9 +69,37 @@ func (e *Engine) tick(ctx context.Context) {
 	if err := e.syncIngress(ctx, now); err != nil {
 		e.logger.Error("sync ingress failed", "error", err)
 	}
+	if err := e.store.DeleteExpiredAdminSessions(ctx, now); err != nil {
+		e.logger.Error("prune expired admin sessions failed", "error", err)
+	}
 	if err := e.store.PruneOldData(ctx, e.cfg.Storage.RetentionDays); err != nil {
 		e.logger.Error("prune old data failed", "error", err)
 	}
+}
+
+func (e *Engine) ensureMonitorChecksSeeded(ctx context.Context, now time.Time) error {
+	count, err := e.store.CountMonitorChecks(ctx)
+	if err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+	for _, check := range config.RuntimeMonitorChecksFromConfig(e.cfg) {
+		seed := check.Normalize()
+		if seed.ID == "" {
+			seed.ID = uuid.NewString()
+		}
+		seed.CreatedAt = now
+		seed.UpdatedAt = now
+		if err := seed.Validate(); err != nil {
+			return err
+		}
+		if _, err := e.cluster.Apply(ctx, cluster.CommandMonitorCheck, seed); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (e *Engine) evaluateNode(ctx context.Context, nodeID string, now time.Time) error {
@@ -534,7 +565,7 @@ func (e *Engine) syncIngress(ctx context.Context, now time.Time) error {
 		Severity:  model.StatusHealthy,
 		NodeID:    targetPeer.NodeID,
 		Title:     "Ingress DNS moved",
-		Body:      fmt.Sprintf("monitor hostname now points at %s (%s)", targetPeer.NodeID, targetPeer.PublicIPv4),
+		Body:      fmt.Sprintf("monitor hostname now points at %s", targetPeer.NodeID),
 		CreatedAt: time.Now().UTC(),
 		Meta: map[string]any{
 			"desired_ip": targetPeer.PublicIPv4,

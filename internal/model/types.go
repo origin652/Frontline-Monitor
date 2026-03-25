@@ -15,7 +15,10 @@ const (
 )
 
 type ServiceCheck struct {
+	ID        string    `json:"id,omitempty"`
+	Type      string    `json:"type,omitempty"`
 	Name      string    `json:"name"`
+	Target    string    `json:"target,omitempty"`
 	Status    string    `json:"status"`
 	Detail    string    `json:"detail"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -58,15 +61,17 @@ type NodeHeartbeat struct {
 }
 
 type ProbeObservation struct {
-	SourceNodeID string            `json:"source_node_id"`
-	TargetNodeID string            `json:"target_node_id"`
-	CollectedAt  time.Time         `json:"collected_at"`
-	TCP22OK      bool              `json:"tcp_22_ok"`
-	TCP443OK     bool              `json:"tcp_443_ok"`
-	HTTPOK       bool              `json:"http_ok"`
-	SSHBannerMS  int64             `json:"ssh_banner_ms"`
-	Ports        []PortResult      `json:"ports"`
-	HTTPChecks   []HTTPCheckResult `json:"http_checks"`
+	SourceNodeID   string            `json:"source_node_id"`
+	SourceNodeName string            `json:"source_node_name,omitempty"`
+	TargetNodeID   string            `json:"target_node_id"`
+	TargetNodeName string            `json:"target_node_name,omitempty"`
+	CollectedAt    time.Time         `json:"collected_at"`
+	TCP22OK        bool              `json:"tcp_22_ok"`
+	TCP443OK       bool              `json:"tcp_443_ok"`
+	HTTPOK         bool              `json:"http_ok"`
+	SSHBannerMS    int64             `json:"ssh_banner_ms"`
+	Ports          []PortResult      `json:"ports"`
+	HTTPChecks     []HTTPCheckResult `json:"http_checks"`
 }
 
 type ProbeSummary struct {
@@ -78,6 +83,7 @@ type ProbeSummary struct {
 
 type NodeState struct {
 	NodeID           string         `json:"node_id"`
+	NodeName         string         `json:"node_name,omitempty"`
 	Status           string         `json:"status"`
 	Reason           string         `json:"reason"`
 	RuleKey          string         `json:"rule_key"`
@@ -99,6 +105,7 @@ type NodeState struct {
 type Incident struct {
 	ID             string     `json:"id"`
 	NodeID         string     `json:"node_id"`
+	NodeName       string     `json:"node_name,omitempty"`
 	RuleKey        string     `json:"rule_key"`
 	Severity       string     `json:"severity"`
 	Status         string     `json:"status"`
@@ -139,6 +146,7 @@ type Event struct {
 	Kind      string         `json:"kind"`
 	Severity  string         `json:"severity"`
 	NodeID    string         `json:"node_id"`
+	NodeName  string         `json:"node_name,omitempty"`
 	Title     string         `json:"title"`
 	Body      string         `json:"body"`
 	Meta      map[string]any `json:"meta"`
@@ -146,12 +154,13 @@ type Event struct {
 }
 
 type IngressState struct {
-	ActiveNodeID string    `json:"active_node_id"`
-	DesiredIP    string    `json:"desired_ip"`
-	DNSSynced    bool      `json:"dns_synced"`
-	DNSSyncedAt  time.Time `json:"dns_synced_at"`
-	LastDNSError string    `json:"last_dns_error"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ActiveNodeID   string    `json:"active_node_id"`
+	ActiveNodeName string    `json:"active_node_name,omitempty"`
+	DesiredIP      string    `json:"desired_ip"`
+	DNSSynced      bool      `json:"dns_synced"`
+	DNSSyncedAt    time.Time `json:"dns_synced_at"`
+	LastDNSError   string    `json:"last_dns_error"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 type NodeDetail struct {
@@ -170,7 +179,9 @@ type MetricPoint struct {
 type ClusterSnapshot struct {
 	GeneratedAt time.Time    `json:"generated_at"`
 	NodeID      string       `json:"node_id"`
+	NodeName    string       `json:"node_name,omitempty"`
 	LeaderID    string       `json:"leader_id"`
+	LeaderName  string       `json:"leader_name,omitempty"`
 	Ingress     IngressState `json:"ingress"`
 	Nodes       []NodeState  `json:"nodes"`
 	Incidents   []Incident   `json:"incidents"`

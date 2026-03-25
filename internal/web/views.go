@@ -7,8 +7,12 @@ import (
 	"vps-monitor/internal/model"
 )
 
-func (s *Server) snapshot(ctx context.Context) (*model.ClusterSnapshot, error) {
-	nodes, err := s.nodeStates(ctx)
+func (s *Server) snapshot(ctx context.Context, isAdmin bool) (*model.ClusterSnapshot, error) {
+	resolver, err := s.newNodeNameResolver(ctx)
+	if err != nil {
+		return nil, err
+	}
+	nodes, err := s.nodeStates(ctx, isAdmin, resolver)
 	if err != nil {
 		return nil, err
 	}
@@ -27,18 +31,28 @@ func (s *Server) snapshot(ctx context.Context) (*model.ClusterSnapshot, error) {
 	if ingress == nil {
 		ingress = &model.IngressState{}
 	}
-	return &model.ClusterSnapshot{
+	s.decorateIncidents(resolver, incidents)
+	s.decorateEvents(resolver, events)
+	s.decorateIngress(resolver, ingress)
+	leaderID := s.cluster.LeaderID()
+	snapshot := &model.ClusterSnapshot{
 		GeneratedAt: time.Now().UTC(),
 		NodeID:      s.cfg.Cluster.NodeID,
-		LeaderID:    s.cluster.LeaderID(),
+		NodeName:    resolver.DisplayName(s.cfg.Cluster.NodeID),
+		LeaderID:    leaderID,
+		LeaderName:  resolver.DisplayName(leaderID),
 		Ingress:     *ingress,
 		Nodes:       nodes,
 		Incidents:   incidents,
 		Events:      events,
-	}, nil
+	}
+	if !isAdmin {
+		s.redactSnapshot(snapshot)
+	}
+	return snapshot, nil
 }
 
-func (s *Server) nodeStates(ctx context.Context) ([]model.NodeState, error) {
+func (s *Server) nodeStates(ctx context.Context, isAdmin bool, resolver nodeNameResolver) ([]model.NodeState, error) {
 	states, err := s.store.ListNodeStates(ctx)
 	if err != nil {
 		return nil, err
@@ -51,21 +65,29 @@ func (s *Server) nodeStates(ctx context.Context) ([]model.NodeState, error) {
 	out := make([]model.NodeState, 0, len(s.cfg.OrderedPeers()))
 	for _, peer := range s.cfg.OrderedPeers() {
 		if state, ok := stateMap[peer.NodeID]; ok {
+			s.decorateNodeState(resolver, &state)
 			out = append(out, state)
 			continue
 		}
-		out = append(out, model.NodeState{
+		state := model.NodeState{
 			NodeID:          peer.NodeID,
+			NodeName:        resolver.DisplayName(peer.NodeID),
 			Status:          model.StatusUnknown,
 			Reason:          "awaiting cluster data",
 			RuleKey:         "telemetry",
 			LastEvaluatedAt: time.Now().UTC(),
-		})
+		}
+		out = append(out, state)
+	}
+	if !isAdmin {
+		for i := range out {
+			s.redactNodeState(&out[i])
+		}
 	}
 	return out, nil
 }
 
-func (s *Server) nodeDetail(ctx context.Context, nodeID string) (model.NodeDetail, error) {
+func (s *Server) nodeDetail(ctx context.Context, nodeID string, isAdmin bool, resolver nodeNameResolver) (model.NodeDetail, error) {
 	state, err := s.store.GetNodeState(ctx, nodeID)
 	if err != nil {
 		return model.NodeDetail{}, err
@@ -79,6 +101,7 @@ func (s *Server) nodeDetail(ctx context.Context, nodeID string) (model.NodeDetai
 			LastEvaluatedAt: time.Now().UTC(),
 		}
 	}
+	s.decorateNodeState(resolver, state)
 	heartbeat, err := s.store.LatestHeartbeat(ctx, nodeID)
 	if err != nil {
 		return model.NodeDetail{}, err
@@ -95,13 +118,19 @@ func (s *Server) nodeDetail(ctx context.Context, nodeID string) (model.NodeDetai
 	if err != nil {
 		return model.NodeDetail{}, err
 	}
-	return model.NodeDetail{
+	s.decorateProbes(resolver, probes)
+	s.decorateIncidents(resolver, incidents)
+	detail := model.NodeDetail{
 		State:     *state,
 		Heartbeat: heartbeat,
 		Probes:    probes,
 		Incidents: incidents,
 		History:   history,
-	}, nil
+	}
+	if !isAdmin {
+		s.redactNodeDetail(&detail)
+	}
+	return detail, nil
 }
 
 func (s *Server) enabledAlertChannels() []string {

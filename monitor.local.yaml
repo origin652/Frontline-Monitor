@@ -4,6 +4,7 @@ cluster:
   priority: 100
   peers:
     - node_id: local
+      display_name: Local Dev Node
       api_addr: 127.0.0.1:8443
       raft_addr: 127.0.0.1:7000
       public_ipv4: 127.0.0.1

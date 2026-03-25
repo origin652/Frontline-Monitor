@@ -7,8 +7,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/netip"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -25,15 +23,17 @@ type Server struct {
 	cfg       *config.Config
 	store     *store.Store
 	cluster   *cluster.Manager
+	submitter *cluster.Submitter
 	notifiers []notify.Notifier
 	logger    *slog.Logger
 }
 
-func New(cfg *config.Config, st *store.Store, cl *cluster.Manager, notifiers []notify.Notifier, logger *slog.Logger) (*Server, error) {
+func New(cfg *config.Config, st *store.Store, cl *cluster.Manager, submitter *cluster.Submitter, notifiers []notify.Notifier, logger *slog.Logger) (*Server, error) {
 	return &Server{
 		cfg:       cfg,
 		store:     st,
 		cluster:   cl,
+		submitter: submitter,
 		notifiers: notifiers,
 		logger:    logger,
 	}, nil
@@ -44,6 +44,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /frontend/", http.StripPrefix("/frontend/", http.FileServer(http.FS(frontendapp.Assets))))
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 	mux.HandleFunc("GET /", s.handleFrontendApp)
+	mux.HandleFunc("GET /admin", s.handleFrontendApp)
 	mux.HandleFunc("GET /nodes/{nodeID}", s.handleFrontendApp)
 	mux.HandleFunc("GET /events", s.handleFrontendApp)
 	mux.HandleFunc("GET /api/v1/cluster", s.handleClusterAPI)
@@ -55,8 +56,22 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/events", s.handleEventsAPI)
 	mux.HandleFunc("GET /api/v1/history", s.handleHistoryAPI)
 	mux.HandleFunc("POST /api/v1/test-alert", s.handleTestAlert)
+	mux.HandleFunc("GET /api/v1/admin/bootstrap-status", s.handleAdminBootstrapStatus)
+	mux.HandleFunc("POST /api/v1/admin/bootstrap", s.handleAdminBootstrap)
+	mux.HandleFunc("POST /api/v1/admin/login", s.handleAdminLogin)
+	mux.HandleFunc("POST /api/v1/admin/logout", s.handleAdminLogout)
+	mux.HandleFunc("GET /api/v1/admin/me", s.handleAdminMe)
+	mux.HandleFunc("POST /api/v1/admin/password", s.handleAdminPassword)
+	mux.HandleFunc("GET /api/v1/admin/checks", s.handleAdminChecks)
+	mux.HandleFunc("POST /api/v1/admin/checks", s.handleAdminChecks)
+	mux.HandleFunc("PUT /api/v1/admin/checks/{id}", s.handleAdminCheckByID)
+	mux.HandleFunc("DELETE /api/v1/admin/checks/{id}", s.handleAdminCheckByID)
+	mux.HandleFunc("GET /api/v1/admin/nodes", s.handleAdminNodes)
+	mux.HandleFunc("PUT /api/v1/admin/nodes/{nodeID}", s.handleAdminNodeByID)
+	mux.HandleFunc("DELETE /api/v1/admin/nodes/{nodeID}", s.handleAdminNodeByID)
 	mux.HandleFunc("POST /internal/v1/observations/heartbeat", s.handleInternalHeartbeat)
 	mux.HandleFunc("POST /internal/v1/observations/probe", s.handleInternalProbe)
+	mux.HandleFunc("POST /internal/v1/cluster/apply", s.handleInternalApply)
 	return mux
 }
 
@@ -91,7 +106,7 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleClusterAPI(w http.ResponseWriter, r *http.Request) {
-	snapshot, err := s.snapshot(r.Context())
+	snapshot, err := s.snapshot(r.Context(), s.isAdminRequest(r))
 	if err != nil {
 		s.renderError(w, http.StatusInternalServerError, err)
 		return
@@ -100,16 +115,40 @@ func (s *Server) handleClusterAPI(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMetaAPI(w http.ResponseWriter, r *http.Request) {
+	initialized, err := s.adminInitialized(r.Context())
+	if err != nil {
+		s.renderError(w, http.StatusInternalServerError, err)
+		return
+	}
+	resolver, err := s.newNodeNameResolver(r.Context())
+	if err != nil {
+		s.renderError(w, http.StatusInternalServerError, err)
+		return
+	}
+	isAdmin := s.isAdminRequest(r)
+	channels := []string{}
+	if isAdmin {
+		channels = s.enabledAlertChannels()
+	}
+	leaderID := s.cluster.LeaderID()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"node_id":                   s.cfg.Cluster.NodeID,
-		"leader_id":                 s.cluster.LeaderID(),
-		"test_alert_channels":       s.enabledAlertChannels(),
-		"test_alert_requires_token": strings.TrimSpace(os.Getenv("MONITOR_TEST_ALERT_TOKEN")) != "",
+		"node_id":             s.cfg.Cluster.NodeID,
+		"node_name":           resolver.DisplayName(s.cfg.Cluster.NodeID),
+		"leader_id":           leaderID,
+		"leader_name":         resolver.DisplayName(leaderID),
+		"test_alert_channels": channels,
+		"admin_initialized":   initialized,
+		"is_admin":            isAdmin,
 	})
 }
 
 func (s *Server) handleNodesAPI(w http.ResponseWriter, r *http.Request) {
-	states, err := s.nodeStates(r.Context())
+	resolver, err := s.newNodeNameResolver(r.Context())
+	if err != nil {
+		s.renderError(w, http.StatusInternalServerError, err)
+		return
+	}
+	states, err := s.nodeStates(r.Context(), s.isAdminRequest(r), resolver)
 	if err != nil {
 		s.renderError(w, http.StatusInternalServerError, err)
 		return
@@ -119,7 +158,12 @@ func (s *Server) handleNodesAPI(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleNodeAPI(w http.ResponseWriter, r *http.Request) {
 	nodeID := r.PathValue("nodeID")
-	detail, err := s.nodeDetail(r.Context(), nodeID)
+	resolver, err := s.newNodeNameResolver(r.Context())
+	if err != nil {
+		s.renderError(w, http.StatusInternalServerError, err)
+		return
+	}
+	detail, err := s.nodeDetail(r.Context(), nodeID, s.isAdminRequest(r), resolver)
 	if err != nil {
 		s.renderError(w, http.StatusInternalServerError, err)
 		return
@@ -136,6 +180,15 @@ func (s *Server) handleIngressAPI(w http.ResponseWriter, r *http.Request) {
 	if ingress == nil {
 		ingress = &model.IngressState{}
 	}
+	resolver, err := s.newNodeNameResolver(r.Context())
+	if err != nil {
+		s.renderError(w, http.StatusInternalServerError, err)
+		return
+	}
+	s.decorateIngress(resolver, ingress)
+	if !s.isAdminRequest(r) {
+		s.redactIngress(ingress)
+	}
 	writeJSON(w, http.StatusOK, ingress)
 }
 
@@ -147,6 +200,12 @@ func (s *Server) handleIncidentsAPI(w http.ResponseWriter, r *http.Request) {
 		s.renderError(w, http.StatusInternalServerError, err)
 		return
 	}
+	resolver, err := s.newNodeNameResolver(r.Context())
+	if err != nil {
+		s.renderError(w, http.StatusInternalServerError, err)
+		return
+	}
+	s.decorateIncidents(resolver, incidents)
 	writeJSON(w, http.StatusOK, incidents)
 }
 
@@ -156,6 +215,15 @@ func (s *Server) handleEventsAPI(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.renderError(w, http.StatusInternalServerError, err)
 		return
+	}
+	resolver, err := s.newNodeNameResolver(r.Context())
+	if err != nil {
+		s.renderError(w, http.StatusInternalServerError, err)
+		return
+	}
+	s.decorateEvents(resolver, events)
+	if !s.isAdminRequest(r) {
+		events = s.redactEvents(events)
 	}
 	writeJSON(w, http.StatusOK, events)
 }
@@ -201,6 +269,10 @@ type testAlertResult struct {
 }
 
 func (s *Server) handleTestAlert(w http.ResponseWriter, r *http.Request) {
+	if !s.isAdminRequest(r) {
+		s.renderError(w, http.StatusUnauthorized, fmt.Errorf("admin login required"))
+		return
+	}
 	if len(s.notifiers) == 0 {
 		s.renderError(w, http.StatusBadRequest, fmt.Errorf("no alert channels are enabled"))
 		return
@@ -210,10 +282,6 @@ func (s *Server) handleTestAlert(w http.ResponseWriter, r *http.Request) {
 	var req testAlertRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
 		s.renderError(w, http.StatusBadRequest, err)
-		return
-	}
-	if err := s.authorizeTestAlert(r, req.Token); err != nil {
-		s.renderError(w, http.StatusUnauthorized, err)
 		return
 	}
 
@@ -262,6 +330,10 @@ func (s *Server) handleTestAlert(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleInternalHeartbeat(w http.ResponseWriter, r *http.Request) {
+	if err := s.requireInternalRequest(r); err != nil {
+		s.renderError(w, http.StatusForbidden, err)
+		return
+	}
 	if !s.cluster.IsLeader() {
 		s.renderError(w, http.StatusConflict, fmt.Errorf("not leader"))
 		return
@@ -280,6 +352,10 @@ func (s *Server) handleInternalHeartbeat(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handleInternalProbe(w http.ResponseWriter, r *http.Request) {
+	if err := s.requireInternalRequest(r); err != nil {
+		s.renderError(w, http.StatusForbidden, err)
+		return
+	}
 	if !s.cluster.IsLeader() {
 		s.renderError(w, http.StatusConflict, fmt.Errorf("not leader"))
 		return
@@ -297,6 +373,35 @@ func (s *Server) handleInternalProbe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]any{"ok": true})
 }
 
+func (s *Server) handleInternalApply(w http.ResponseWriter, r *http.Request) {
+	if err := s.requireInternalRequest(r); err != nil {
+		s.renderError(w, http.StatusForbidden, err)
+		return
+	}
+	if !s.cluster.IsLeader() {
+		s.renderError(w, http.StatusConflict, fmt.Errorf("not leader"))
+		return
+	}
+	defer r.Body.Close()
+	var req struct {
+		Type    string          `json:"type"`
+		Payload json.RawMessage `json:"payload"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		s.renderError(w, http.StatusBadRequest, err)
+		return
+	}
+	if !s.isAllowedInternalCommand(req.Type) {
+		s.renderError(w, http.StatusBadRequest, fmt.Errorf("unsupported internal command"))
+		return
+	}
+	if _, err := s.cluster.ApplyRaw(r.Context(), req.Type, req.Payload); err != nil {
+		s.renderError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"ok": true})
+}
+
 func (s *Server) renderError(w http.ResponseWriter, status int, err error) {
 	s.logger.Error("http handler error", "status", status, "error", err)
 	writeJSON(w, status, map[string]any{"error": err.Error()})
@@ -306,31 +411,6 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(payload)
-}
-
-func (s *Server) authorizeTestAlert(r *http.Request, token string) error {
-	envToken := strings.TrimSpace(os.Getenv("MONITOR_TEST_ALERT_TOKEN"))
-	if envToken != "" {
-		if subtleCompare(token, envToken) {
-			return nil
-		}
-		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-		if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") && subtleCompare(strings.TrimSpace(authHeader[7:]), envToken) {
-			return nil
-		}
-		return fmt.Errorf("invalid test alert token")
-	}
-
-	host := r.RemoteAddr
-	if parsed, err := netip.ParseAddrPort(host); err == nil {
-		if parsed.Addr().IsLoopback() {
-			return nil
-		}
-	}
-	if strings.HasPrefix(host, "127.0.0.1:") || strings.HasPrefix(host, "[::1]:") {
-		return nil
-	}
-	return fmt.Errorf("test alerts require loopback access or MONITOR_TEST_ALERT_TOKEN")
 }
 
 func (s *Server) pickNotifiers(channel string) []notify.Notifier {
@@ -345,17 +425,6 @@ func (s *Server) pickNotifiers(channel string) []notify.Notifier {
 		}
 	}
 	return selected
-}
-
-func subtleCompare(a, b string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	var diff byte
-	for i := 0; i < len(a); i++ {
-		diff |= a[i] ^ b[i]
-	}
-	return diff == 0
 }
 
 func truncate(value string, limit int) string {

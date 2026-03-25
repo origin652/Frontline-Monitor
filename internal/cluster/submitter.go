@@ -17,6 +17,11 @@ type Submitter struct {
 	client  *http.Client
 }
 
+type applyCommandRequest struct {
+	Type    string          `json:"type"`
+	Payload json.RawMessage `json:"payload"`
+}
+
 func NewSubmitter(manager *Manager) *Submitter {
 	return &Submitter{
 		manager: manager,
@@ -67,4 +72,19 @@ func (s *Submitter) post(ctx context.Context, path string, payload any) error {
 		return fmt.Errorf("leader submit failed with %s: %s", resp.Status, string(body))
 	}
 	return nil
+}
+
+func (s *Submitter) Apply(ctx context.Context, cmdType string, payload any) error {
+	if s.manager.IsLeader() {
+		_, err := s.manager.Apply(ctx, cmdType, payload)
+		return err
+	}
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	return s.post(ctx, "/internal/v1/cluster/apply", applyCommandRequest{
+		Type:    cmdType,
+		Payload: payloadBytes,
+	})
 }

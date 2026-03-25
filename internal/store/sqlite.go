@@ -21,13 +21,17 @@ type Store struct {
 }
 
 type SnapshotData struct {
-	MetricSamples   []model.NodeHeartbeat    `json:"metric_samples"`
-	ProbeSamples    []model.ProbeObservation `json:"probe_samples"`
-	NodeStates      []model.NodeState        `json:"node_states"`
-	Incidents       []model.Incident         `json:"incidents"`
-	AlertDeliveries []model.AlertDelivery    `json:"alert_deliveries"`
-	Events          []model.Event            `json:"events"`
-	Ingress         *model.IngressState      `json:"ingress,omitempty"`
+	MetricSamples    []model.NodeHeartbeat    `json:"metric_samples"`
+	ProbeSamples     []model.ProbeObservation `json:"probe_samples"`
+	NodeStates       []model.NodeState        `json:"node_states"`
+	Incidents        []model.Incident         `json:"incidents"`
+	AlertDeliveries  []model.AlertDelivery    `json:"alert_deliveries"`
+	Events           []model.Event            `json:"events"`
+	Ingress          *model.IngressState      `json:"ingress,omitempty"`
+	AdminSettings    *model.AdminSettings     `json:"admin_settings,omitempty"`
+	AdminSessions    []model.AdminSession     `json:"admin_sessions,omitempty"`
+	MonitorChecks    []model.MonitorCheck     `json:"monitor_checks,omitempty"`
+	NodeDisplayNames []model.NodeDisplayName  `json:"node_display_names,omitempty"`
 }
 
 func Open(path string) (*Store, error) {
@@ -142,6 +146,33 @@ func (s *Store) init(ctx context.Context) error {
 			dns_synced INTEGER NOT NULL,
 			dns_synced_at TEXT NOT NULL,
 			last_dns_error TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS admin_settings (
+			singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+			password_hash TEXT NOT NULL,
+			initialized_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS admin_sessions (
+			session_id TEXT PRIMARY KEY,
+			created_at TEXT NOT NULL,
+			expires_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS monitor_checks (
+			id TEXT PRIMARY KEY,
+			type TEXT NOT NULL,
+			name TEXT NOT NULL,
+			enabled INTEGER NOT NULL,
+			sort_order INTEGER NOT NULL,
+			config_json TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_monitor_checks_sort ON monitor_checks(sort_order ASC, created_at ASC)`,
+		`CREATE TABLE IF NOT EXISTS node_display_names (
+			node_id TEXT PRIMARY KEY,
+			display_name TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		)`,
 	}
@@ -609,14 +640,34 @@ func (s *Store) Snapshot(ctx context.Context) (*SnapshotData, error) {
 	if err != nil {
 		return nil, err
 	}
+	adminSettings, err := s.GetAdminSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	adminSessions, err := s.ListAdminSessions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	monitorChecks, err := s.ListMonitorChecks(ctx)
+	if err != nil {
+		return nil, err
+	}
+	nodeDisplayNames, err := s.ListNodeDisplayNames(ctx)
+	if err != nil {
+		return nil, err
+	}
 	return &SnapshotData{
-		MetricSamples:   metrics,
-		ProbeSamples:    probes,
-		NodeStates:      nodeStates,
-		Incidents:       incidents,
-		AlertDeliveries: deliveries,
-		Events:          events,
-		Ingress:         ingress,
+		MetricSamples:    metrics,
+		ProbeSamples:     probes,
+		NodeStates:       nodeStates,
+		Incidents:        incidents,
+		AlertDeliveries:  deliveries,
+		Events:           events,
+		Ingress:          ingress,
+		AdminSettings:    adminSettings,
+		AdminSessions:    adminSessions,
+		MonitorChecks:    monitorChecks,
+		NodeDisplayNames: nodeDisplayNames,
 	}, nil
 }
 
@@ -635,6 +686,10 @@ func (s *Store) Restore(ctx context.Context, snap SnapshotData) error {
 		`DELETE FROM alert_deliveries`,
 		`DELETE FROM events`,
 		`DELETE FROM ingress_state`,
+		`DELETE FROM admin_settings`,
+		`DELETE FROM admin_sessions`,
+		`DELETE FROM monitor_checks`,
+		`DELETE FROM node_display_names`,
 	} {
 		if _, err := tx.ExecContext(ctx, stmt); err != nil {
 			return err
@@ -739,6 +794,47 @@ func (s *Store) Restore(ctx context.Context, snap SnapshotData) error {
 		}
 	}
 
+	if snap.AdminSettings != nil {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO admin_settings (singleton, password_hash, initialized_at, updated_at)
+			VALUES (1, ?, ?, ?)`,
+			snap.AdminSettings.PasswordHash, snap.AdminSettings.InitializedAt.Format(timeLayout), snap.AdminSettings.UpdatedAt.Format(timeLayout),
+		); err != nil {
+			return err
+		}
+	}
+
+	for _, session := range snap.AdminSessions {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO admin_sessions (session_id, created_at, expires_at)
+			VALUES (?, ?, ?)`,
+			session.ID, session.CreatedAt.Format(timeLayout), session.ExpiresAt.Format(timeLayout),
+		); err != nil {
+			return err
+		}
+	}
+
+	for _, check := range snap.MonitorChecks {
+		configJSON, _ := marshalMonitorCheckConfig(check)
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO monitor_checks (id, type, name, enabled, sort_order, config_json, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			check.ID, check.Type, check.Name, boolToInt(check.Enabled), check.SortOrder, configJSON, check.CreatedAt.Format(timeLayout), check.UpdatedAt.Format(timeLayout),
+		); err != nil {
+			return err
+		}
+	}
+
+	for _, item := range snap.NodeDisplayNames {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO node_display_names (node_id, display_name, updated_at)
+			VALUES (?, ?, ?)`,
+			item.NodeID, item.DisplayName, item.UpdatedAt.Format(timeLayout),
+		); err != nil {
+			return err
+		}
+	}
+
 	return tx.Commit()
 }
 
@@ -752,6 +848,7 @@ func (s *Store) PruneOldData(ctx context.Context, retentionDays int) error {
 		{`DELETE FROM probe_samples WHERE collected_at < ?`, cutoff},
 		{`DELETE FROM events WHERE created_at < ?`, cutoff},
 		{`DELETE FROM alert_deliveries WHERE created_at < ?`, cutoff},
+		{`DELETE FROM admin_sessions WHERE expires_at < ?`, time.Now().UTC().Format(timeLayout)},
 	} {
 		if _, err := s.db.ExecContext(ctx, stmt.query, stmt.arg); err != nil {
 			return err

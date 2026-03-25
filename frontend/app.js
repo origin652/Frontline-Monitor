@@ -18,6 +18,8 @@
   let currentSearchItems = [];
   let currentSearchQuery = "";
   let searchPanelOpen = false;
+  let sidebarDrawerOpen = false;
+  let activeMeta = {};
 
   document.addEventListener("click", handleDocumentClick);
   document.addEventListener("change", handleDocumentChange);
@@ -28,6 +30,7 @@
   window.addEventListener("popstate", () => {
     renderRoute();
   });
+  window.addEventListener("resize", handleWindowResize);
 
   applyTheme(document.documentElement.dataset.theme || document.body.dataset.defaultTheme || "graphite");
   renderRoute();
@@ -36,6 +39,27 @@
     const searchRoot = event.target.closest("[data-search-root]");
     if (!searchRoot) {
       closeSearchPanel();
+    }
+
+    const sidebarToggle = event.target.closest("[data-sidebar-toggle]");
+    if (sidebarToggle) {
+      event.preventDefault();
+      toggleSidebarDrawer();
+      return;
+    }
+
+    const sidebarDismiss = event.target.closest("[data-sidebar-dismiss]");
+    if (sidebarDismiss) {
+      event.preventDefault();
+      toggleSidebarDrawer(false);
+      return;
+    }
+
+    const actionButton = event.target.closest("[data-admin-action]");
+    if (actionButton) {
+      event.preventDefault();
+      handleAdminAction(actionButton);
+      return;
     }
 
     const link = event.target.closest("a[data-link]");
@@ -59,6 +83,7 @@
     }
 
     event.preventDefault();
+    toggleSidebarDrawer(false);
     if (url.pathname !== window.location.pathname) {
       window.history.pushState({}, "", url.pathname);
     }
@@ -67,6 +92,9 @@
 
   function handleDocumentChange(event) {
     if (!event.target.matches("[data-theme-select]")) {
+      if (event.target.matches("[data-check-type]")) {
+        syncAdminCheckForm();
+      }
       return;
     }
     applyTheme(event.target.value);
@@ -90,6 +118,12 @@
   }
 
   function handleDocumentKeydown(event) {
+    if (event.key === "Escape" && sidebarDrawerOpen) {
+      event.preventDefault();
+      toggleSidebarDrawer(false);
+      return;
+    }
+
     if ((event.ctrlKey || event.metaKey) && !event.shiftKey && String(event.key).toLowerCase() === "k") {
       event.preventDefault();
       focusSearchInput();
@@ -117,18 +151,108 @@
     }
   }
 
+  function handleWindowResize() {
+    if (window.innerWidth > 980 && sidebarDrawerOpen) {
+      toggleSidebarDrawer(false);
+    }
+  }
+
   async function handleDocumentSubmit(event) {
-    if (event.target.id !== "test-alert-form") {
+    if (event.target.id === "test-alert-form") {
+      event.preventDefault();
+      try {
+        await submitTestAlert(event.target);
+      } catch (error) {
+        const result = document.getElementById("test-alert-result");
+        if (result) {
+          result.innerHTML = '<p>' + escapeHTML(error.message || "发送失败") + "</p>";
+        }
+      }
       return;
     }
-    event.preventDefault();
-    try {
-      await submitTestAlert(event.target);
-    } catch (error) {
-      const result = document.getElementById("test-alert-result");
-      if (result) {
-        result.innerHTML = '<p>' + escapeHTML(error.message || "发送失败") + "</p>";
-      }
+    if (event.target.id === "admin-bootstrap-form") {
+      event.preventDefault();
+      await submitAdminBootstrap(event.target);
+      return;
+    }
+    if (event.target.id === "admin-login-form") {
+      event.preventDefault();
+      await submitAdminLogin(event.target);
+      return;
+    }
+    if (event.target.id === "admin-logout-form") {
+      event.preventDefault();
+      await submitAdminLogout();
+      return;
+    }
+    if (event.target.id === "admin-password-form") {
+      event.preventDefault();
+      await submitAdminPassword(event.target);
+      return;
+    }
+    if (event.target.id === "admin-check-form") {
+      event.preventDefault();
+      await submitAdminCheck(event.target);
+      return;
+    }
+    if (event.target.id === "admin-node-name-form") {
+      event.preventDefault();
+      await submitAdminNodeName(event.target);
+      return;
+    }
+  }
+
+  function setAdminNotice(message, isError) {
+    const node = document.getElementById("admin-notice");
+    if (!node) {
+      return;
+    }
+    node.className = "admin-notice" + (isError ? " is-error" : "");
+    node.textContent = message || "";
+  }
+
+  function setAdminCheckNotice(message, isError) {
+    const node = document.getElementById("admin-check-notice");
+    if (!node) {
+      return;
+    }
+    node.className = "admin-notice" + (isError ? " is-error" : "");
+    node.textContent = message || "";
+  }
+
+  function setAdminNodeNotice(message, isError) {
+    const node = document.getElementById("admin-node-notice");
+    if (!node) {
+      return;
+    }
+    node.className = "admin-notice" + (isError ? " is-error" : "");
+    node.textContent = message || "";
+  }
+
+  function handleAdminAction(button) {
+    const action = button.dataset.adminAction || "";
+    if (action === "edit-check") {
+      fillAdminCheckForm(button.dataset.check || "");
+      return;
+    }
+    if (action === "clear-check-form") {
+      resetAdminCheckForm();
+      return;
+    }
+    if (action === "delete-check") {
+      deleteAdminCheck(button.dataset.checkId || "");
+      return;
+    }
+    if (action === "edit-node-name") {
+      fillAdminNodeNameForm(button.dataset.node || "");
+      return;
+    }
+    if (action === "clear-node-form") {
+      resetAdminNodeNameForm();
+      return;
+    }
+    if (action === "reset-node-name") {
+      deleteAdminNodeName(button.dataset.nodeId || "");
     }
   }
 
@@ -140,6 +264,9 @@
     const routeKey = buildRouteKey(route);
     const backgroundRefresh = Boolean(settings.backgroundRefresh);
     const shouldShowLoading = !backgroundRefresh && (!app.innerHTML || routeKey !== lastRouteKey);
+    if (!backgroundRefresh && routeKey !== lastRouteKey) {
+      sidebarDrawerOpen = false;
+    }
     document.body.dataset.page = route.page;
 
     if (shouldShowLoading) {
@@ -155,6 +282,7 @@
         content: renderStatePanel("加载中", "正在从 API 拉取最新集群状态。", route)
       });
       syncThemeSelect();
+      syncSidebarDrawer();
     }
 
     try {
@@ -173,6 +301,8 @@
       lastRouteKey = routeKey;
       syncThemeSelect();
       syncSearchUI();
+      syncAdminCheckForm();
+      syncSidebarDrawer();
       scheduleRefresh();
     } catch (error) {
       if (token !== renderToken) {
@@ -193,14 +323,29 @@
         title: routeTitle(route),
         localNodeID: "-",
         leaderID: "不可用",
+        meta: activeMeta,
         generatedAt: new Date().toISOString(),
         content: renderStatePanel("加载失败", error.message || "接口请求失败。", route)
       });
       lastRouteKey = routeKey;
       syncThemeSelect();
       syncSearchUI();
+      syncSidebarDrawer();
       scheduleRefresh();
     }
+  }
+
+  function toggleSidebarDrawer(force) {
+    sidebarDrawerOpen = typeof force === "boolean" ? force : !sidebarDrawerOpen;
+    syncSidebarDrawer();
+  }
+
+  function syncSidebarDrawer() {
+    document.body.dataset.sidebarOpen = sidebarDrawerOpen ? "true" : "false";
+    document.body.classList.toggle("has-sidebar-open", sidebarDrawerOpen);
+    document.querySelectorAll("[data-sidebar-toggle]").forEach((button) => {
+      button.setAttribute("aria-expanded", sidebarDrawerOpen ? "true" : "false");
+    });
   }
 
   function scheduleRefresh() {
@@ -240,6 +385,9 @@
     if (normalized === "/") {
       return { page: "overview" };
     }
+    if (normalized === "/admin") {
+      return { page: "admin" };
+    }
     if (normalized === "/events") {
       return { page: "events" };
     }
@@ -254,6 +402,8 @@
     switch (route.page) {
       case "overview":
         return "总览";
+      case "admin":
+        return "管理";
       case "events":
         return "事件";
       case "node":
@@ -267,6 +417,8 @@
     switch (route.page) {
       case "overview":
         return "overview";
+      case "admin":
+        return "events-page";
       case "node":
         return "node-page";
       default:
@@ -278,6 +430,8 @@
     switch (route.page) {
       case "overview":
         return loadOverviewView();
+      case "admin":
+        return loadAdminView();
       case "events":
         return loadEventsView();
       case "node":
@@ -295,7 +449,10 @@
   }
 
   async function loadOverviewView() {
-    const snapshot = await fetchJSON("/api/v1/cluster");
+    const [snapshot, meta] = await Promise.all([
+      fetchJSON("/api/v1/cluster"),
+      fetchJSON("/api/v1/meta").catch(() => ({ is_admin: false, admin_initialized: false, test_alert_channels: [] }))
+    ]);
     const nodes = Array.isArray(snapshot.nodes) ? snapshot.nodes : [];
     const historyEntries = await Promise.all(
       nodes.map(async (node) => {
@@ -313,8 +470,12 @@
       page: "overview",
       title: "总览",
       localNodeID: snapshot.node_id || "-",
+      localNodeName: nodeLabelFrom(snapshot.node_name, snapshot.node_id),
       currentNodeID: snapshot.node_id || "",
+      currentNodeName: nodeLabelFrom(snapshot.node_name, snapshot.node_id),
       leaderID: snapshot.leader_id || "",
+      leaderName: nodeLabelFrom(snapshot.leader_name, snapshot.leader_id),
+      meta: meta,
       generatedAt: snapshot.generated_at || new Date().toISOString(),
       content: renderOverview(snapshot, historyMap),
       searchIndex: buildSearchIndex({
@@ -326,26 +487,32 @@
   }
 
   async function loadNodeView(nodeID) {
-    const [detail, snapshot, memHistory, diskHistory] = await Promise.all([
+    const [detail, snapshot, memHistory, diskHistory, meta] = await Promise.all([
       fetchJSON("/api/v1/nodes/" + encodeURIComponent(nodeID)),
       fetchJSON("/api/v1/cluster"),
       fetchHistory(nodeID, "mem_pct").catch(() => []),
-      fetchHistory(nodeID, "disk_pct").catch(() => [])
+      fetchHistory(nodeID, "disk_pct").catch(() => []),
+      fetchJSON("/api/v1/meta").catch(() => ({ is_admin: false, admin_initialized: false, test_alert_channels: [] }))
     ]);
 
     return {
       page: "node",
-      title: "节点 " + nodeID,
+      title: "节点 " + nodeLabelFrom(detail && detail.state && detail.state.node_name, nodeID),
       localNodeID: snapshot.node_id || "-",
+      localNodeName: nodeLabelFrom(snapshot.node_name, snapshot.node_id),
       currentNodeID: nodeID,
+      currentNodeName: nodeLabelFrom(detail && detail.state && detail.state.node_name, nodeID),
       leaderID: snapshot.leader_id || "",
+      leaderName: nodeLabelFrom(snapshot.leader_name, snapshot.leader_id),
+      meta: meta,
       generatedAt: snapshot.generated_at || new Date().toISOString(),
-      content: renderNodePage(nodeID, detail, snapshot, memHistory, diskHistory),
+      content: renderNodePage(nodeID, detail, snapshot, memHistory, diskHistory, meta),
       searchIndex: buildSearchIndex({
         snapshot: snapshot,
         incidents: detail.incidents,
         events: snapshot.events,
-        currentNodeID: nodeID
+        currentNodeID: nodeID,
+        currentNodeName: nodeLabelFrom(detail && detail.state && detail.state.node_name, nodeID)
       })
     };
   }
@@ -357,7 +524,8 @@
       fetchJSON("/api/v1/events?limit=40"),
       fetchJSON("/api/v1/meta").catch(() => ({
         test_alert_channels: [],
-        test_alert_requires_token: false
+        admin_initialized: false,
+        is_admin: false
       }))
     ]);
 
@@ -365,14 +533,56 @@
       page: "events",
       title: "事件",
       localNodeID: snapshot.node_id || meta.node_id || "-",
+      localNodeName: nodeLabelFrom(snapshot.node_name || meta.node_name, snapshot.node_id || meta.node_id),
       currentNodeID: snapshot.node_id || meta.node_id || "",
+      currentNodeName: nodeLabelFrom(snapshot.node_name || meta.node_name, snapshot.node_id || meta.node_id),
       leaderID: snapshot.leader_id || meta.leader_id || "",
+      leaderName: nodeLabelFrom(snapshot.leader_name || meta.leader_name, snapshot.leader_id || meta.leader_id),
+      meta: meta,
       generatedAt: snapshot.generated_at || new Date().toISOString(),
       content: renderEventsPage(snapshot, incidents, events, meta),
       searchIndex: buildSearchIndex({
         snapshot: snapshot,
         incidents: incidents,
         events: events
+      })
+    };
+  }
+
+  async function loadAdminView() {
+    const meta = await fetchJSON("/api/v1/meta").catch(() => ({
+      admin_initialized: false,
+      is_admin: false,
+      node_id: "-",
+      node_name: "-",
+      leader_id: "",
+      leader_name: ""
+    }));
+    let checks = [];
+    let nodes = [];
+    if (meta.is_admin) {
+      [checks, nodes] = await Promise.all([
+        fetchJSON("/api/v1/admin/checks").catch(() => []),
+        fetchJSON("/api/v1/admin/nodes").catch(() => [])
+      ]);
+    }
+
+    return {
+      page: "admin",
+      title: meta.is_admin ? "管理后台" : "管理员登录",
+      localNodeID: meta.node_id || "-",
+      localNodeName: nodeLabelFrom(meta.node_name, meta.node_id),
+      currentNodeID: meta.node_id || "",
+      currentNodeName: nodeLabelFrom(meta.node_name, meta.node_id),
+      leaderID: meta.leader_id || "",
+      leaderName: nodeLabelFrom(meta.leader_name, meta.leader_id),
+      meta: meta,
+      generatedAt: new Date().toISOString(),
+      content: renderAdminPage(meta, checks, nodes),
+      searchIndex: buildSearchIndex({
+        snapshot: { node_id: meta.node_id, node_name: meta.node_name, nodes: [], events: [], incidents: [] },
+        incidents: [],
+        events: []
       })
     };
   }
@@ -409,11 +619,11 @@
         <section class="command-deck">
           <div class="command-deck__copy">
             <p class="eyebrow">总览</p>
-            <h2>${snapshot.ingress && snapshot.ingress.active_node_id ? "入口当前指向 " + escapeHTML(snapshot.ingress.active_node_id) : "入口正在等待新的 active node"}</h2>
+            <h2>${snapshot.ingress && snapshot.ingress.active_node_id ? "入口当前指向 " + escapeHTML(ingressNodeLabel(snapshot.ingress)) : "入口正在等待新的 active node"}</h2>
             <p class="command-deck__lede">这个页面完全由前端自己消费 API 后拼出来。先看入口与 DNS，再看节点健康、活跃 incident 和互探矩阵。</p>
           </div>
           <div class="command-deck__stats">
-            ${renderSummaryCard("Ingress 节点", snapshot.ingress && snapshot.ingress.active_node_id ? snapshot.ingress.active_node_id : "待选举", "当前对外流量落点")}
+            ${renderSummaryCard("Ingress 节点", snapshot.ingress && snapshot.ingress.active_node_id ? ingressNodeLabel(snapshot.ingress) : "待选举", "当前对外流量落点")}
             ${renderSummaryCard("DNS 同步", snapshot.ingress && snapshot.ingress.dns_synced ? "已同步" : "待同步", snapshot.ingress && snapshot.ingress.dns_synced_at ? timeAgo(snapshot.ingress.dns_synced_at) : "尚未同步")}
             ${renderSummaryCard("活跃 Incident", String(incidents.length), "当前需要处理的异常")}
             ${renderSummaryCard("Critical 节点", String(counts.critical), counts.healthy + " 个节点处于稳定状态")}
@@ -510,7 +720,7 @@
           </div>
           <div class="node-command__facts">
             ${renderSummaryCard("Heartbeat", timeAgo(state.last_heartbeat_at), "最后一次心跳")}
-            ${renderSummaryCard("Leader", snapshot.leader_id || "选举中", "当前决策节点")}
+            ${renderSummaryCard("Leader", nodeLabelFrom(snapshot.leader_name, snapshot.leader_id) || "选举中", "当前决策节点")}
             ${renderSummaryCard("Ingress", ingressRole, "当前入口角色")}
             ${renderSummaryCard("Incident 记录", String(incidents.length), "近期历史长度")}
           </div>
@@ -610,7 +820,7 @@
             <p>这个页现在完全由独立前端入口消费 <code>/api/v1/incidents</code>、<code>/api/v1/events</code> 与轻量元信息 API 渲染。</p>
           </div>
           <div class="events-command__stats">
-            ${renderSummaryCard("Ingress", snapshot.ingress && snapshot.ingress.active_node_id ? snapshot.ingress.active_node_id : "待选举", "当前入口落点")}
+            ${renderSummaryCard("Ingress", snapshot.ingress && snapshot.ingress.active_node_id ? ingressNodeLabel(snapshot.ingress) : "待选举", "当前入口落点")}
             ${renderSummaryCard("DNS", snapshot.ingress && snapshot.ingress.dns_synced ? "已同步" : "待同步", "域名回源状态")}
             ${renderSummaryCard("活跃 Incident", String(activeIncidentCount), "当前仍在打开的异常")}
             ${renderSummaryCard("最近事件", String(eventList.length), "最近一次采样保留下来的轨迹")}
@@ -669,6 +879,316 @@
     `;
   }
 
+  function renderAdminPage(meta, checks, nodes) {
+    const list = Array.isArray(checks) ? checks : [];
+    const nodeList = Array.isArray(nodes) ? nodes : [];
+    const initialized = Boolean(meta && meta.admin_initialized);
+    const isAdmin = Boolean(meta && meta.is_admin);
+
+    if (!initialized) {
+      return `
+        <main class="obs-page obs-page--admin">
+          <section class="obs-section admin-panel">
+            <div class="obs-section__head">
+              <div>
+                <p class="obs-section__eyebrow">Bootstrap</p>
+                <h2>设置管理员密码</h2>
+              </div>
+              <p>当前系统还没有管理员。第一次设置完成后，敏感信息和管理接口才会切到受保护状态。</p>
+            </div>
+            <form id="admin-bootstrap-form" class="admin-form">
+              <label>
+                <span>Password</span>
+                <input type="password" name="password" minlength="8" required>
+              </label>
+              <button type="submit" class="admin-button">初始化管理员</button>
+            </form>
+            <p id="admin-notice" class="admin-notice"></p>
+          </section>
+        </main>
+      `;
+    }
+
+    if (!isAdmin) {
+      return `
+        <main class="obs-page obs-page--admin">
+          <section class="obs-section admin-panel">
+            <div class="obs-section__head">
+              <div>
+                <p class="obs-section__eyebrow">Authentication</p>
+                <h2>管理员登录</h2>
+              </div>
+              <p>登录后可查看敏感信息、发送测试告警，并管理运行时检测项。</p>
+            </div>
+            <form id="admin-login-form" class="admin-form">
+              <label>
+                <span>Password</span>
+                <input type="password" name="password" minlength="8" required>
+              </label>
+              <button type="submit" class="admin-button">登录</button>
+            </form>
+            <p id="admin-notice" class="admin-notice"></p>
+          </section>
+        </main>
+      `;
+    }
+
+    return `
+      <main class="obs-page obs-page--admin">
+        <section class="obs-split admin-top">
+          <article class="obs-section admin-panel">
+            <div class="obs-section__head">
+              <div>
+                <p class="obs-section__eyebrow">Session</p>
+                <h2>管理员会话</h2>
+              </div>
+            </div>
+            <div class="admin-actions">
+              <form id="admin-logout-form">
+                <button type="submit" class="admin-button admin-button--secondary">退出登录</button>
+              </form>
+            </div>
+            <p id="admin-notice" class="admin-notice"></p>
+          </article>
+
+          <article class="obs-section admin-panel">
+            <div class="obs-section__head">
+              <div>
+                <p class="obs-section__eyebrow">Password</p>
+                <h2>修改管理员密码</h2>
+              </div>
+            </div>
+            <form id="admin-password-form" class="admin-form">
+              <label>
+                <span>Current Password</span>
+                <input type="password" name="current_password" minlength="8" required>
+              </label>
+              <label>
+                <span>New Password</span>
+                <input type="password" name="new_password" minlength="8" required>
+              </label>
+              <button type="submit" class="admin-button">更新密码</button>
+            </form>
+          </article>
+        </section>
+
+        <section class="obs-split admin-content">
+          <article class="obs-section admin-panel">
+            <div class="obs-section__head">
+              <div>
+                <p class="obs-section__eyebrow">Runtime Checks</p>
+                <h2>检测项编辑器</h2>
+              </div>
+              <p>支持 <code>systemd</code>、<code>docker</code>、<code>http</code>、<code>tcp</code>，保存后下一轮采集立即生效。</p>
+            </div>
+            <form id="admin-check-form" class="admin-form admin-form--grid">
+              <input type="hidden" name="id">
+              <label>
+                <span>Name</span>
+                <input type="text" name="name" required>
+              </label>
+              <label>
+                <span>Type</span>
+                <select name="type" data-check-type>
+                  <option value="systemd">systemd</option>
+                  <option value="docker">docker</option>
+                  <option value="http">http</option>
+                  <option value="tcp">tcp</option>
+                </select>
+              </label>
+              <label class="admin-check-field" data-field="service_name">
+                <span>Service Name</span>
+                <input type="text" name="service_name">
+              </label>
+              <label class="admin-check-field" data-field="container_name">
+                <span>Container Name</span>
+                <input type="text" name="container_name">
+              </label>
+              <label class="admin-check-field" data-field="scheme">
+                <span>Scheme</span>
+                <select name="scheme">
+                  <option value="http">http</option>
+                  <option value="https">https</option>
+                </select>
+              </label>
+              <label class="admin-check-field" data-field="host_mode">
+                <span>Host Mode</span>
+                <select name="host_mode">
+                  <option value="peer">peer</option>
+                  <option value="local">local</option>
+                </select>
+              </label>
+              <label class="admin-check-field" data-field="port">
+                <span>Port</span>
+                <input type="number" name="port" min="1" max="65535">
+              </label>
+              <label class="admin-check-field" data-field="path">
+                <span>Path</span>
+                <input type="text" name="path" placeholder="/">
+              </label>
+              <label class="admin-check-field" data-field="expect_status">
+                <span>Expect Status</span>
+                <input type="number" name="expect_status" min="100" max="599" placeholder="200">
+              </label>
+              <label class="admin-check-field" data-field="timeout">
+                <span>Timeout</span>
+                <input type="text" name="timeout" placeholder="3s">
+              </label>
+              <label class="admin-check-field" data-field="label">
+                <span>Label</span>
+                <input type="text" name="label">
+              </label>
+              <label class="admin-toggle">
+                <input type="checkbox" name="enabled" checked>
+                <span>Enabled</span>
+              </label>
+              <div class="admin-form__actions">
+                <button type="submit" class="admin-button">保存检测项</button>
+                <button type="button" class="admin-button admin-button--secondary" data-admin-action="clear-check-form">清空</button>
+              </div>
+            </form>
+            <p id="admin-check-notice" class="admin-notice"></p>
+          </article>
+
+          <article class="obs-section admin-panel">
+            <div class="obs-section__head">
+              <div>
+                <p class="obs-section__eyebrow">Current Checks</p>
+                <h2>已生效检测项</h2>
+              </div>
+            </div>
+            <div class="admin-check-list">
+              ${list.length > 0
+                ? list.map((check) => renderAdminCheckRow(check)).join("")
+                : emptyRune("No checks yet", "Create the first runtime check to replace static monitor.yaml service lists.")}
+            </div>
+          </article>
+        </section>
+
+        <section class="obs-split admin-content">
+          <article class="obs-section admin-panel">
+            <div class="obs-section__head">
+              <div>
+                <p class="obs-section__eyebrow">Node Names</p>
+                <h2>节点显示名称</h2>
+              </div>
+              <p>这里只改页面和 API 的显示名，不会修改 <code>node_id</code>、Raft 身份或路由。留空可恢复默认名称。</p>
+            </div>
+            <form id="admin-node-name-form" class="admin-form admin-form--grid">
+              <label>
+                <span>Node</span>
+                <select name="node_id">
+                  ${nodeList.map((node) => `<option value="${escapeHTML(node.node_id || "")}">${escapeHTML(formatAdminNodeOption(node))}</option>`).join("")}
+                </select>
+              </label>
+              <label>
+                <span>Display Name</span>
+                <input type="text" name="display_name" maxlength="80" placeholder="留空则恢复默认名称">
+              </label>
+              <div class="admin-form__actions">
+                <button type="submit" class="admin-button">保存节点名称</button>
+                <button type="button" class="admin-button admin-button--secondary" data-admin-action="clear-node-form">清空</button>
+              </div>
+            </form>
+            <p id="admin-node-notice" class="admin-notice"></p>
+          </article>
+
+          <article class="obs-section admin-panel">
+            <div class="obs-section__head">
+              <div>
+                <p class="obs-section__eyebrow">Current Names</p>
+                <h2>当前节点名称映射</h2>
+              </div>
+            </div>
+            <div class="admin-check-list">
+              ${nodeList.length > 0
+                ? nodeList.map((node) => renderAdminNodeNameRow(node)).join("")
+                : emptyRune("No nodes configured", "Cluster peers will appear here after configuration loads.")}
+            </div>
+          </article>
+        </section>
+      </main>
+    `;
+  }
+
+  function renderAdminCheckRow(check) {
+    const encoded = encodeURIComponent(JSON.stringify(check || {}));
+    return `
+      <article class="service-row status-surface admin-check-row" data-status="${check.enabled ? "healthy" : "unknown"}">
+        <div class="admin-check-row__head">
+          <div>
+            <strong>${escapeHTML(check.name || check.type || "check")}</strong>
+            <span>${escapeHTML((check.type || "check") + (check.enabled ? " · enabled" : " · disabled"))}</span>
+          </div>
+          <div class="admin-check-row__actions">
+            <button type="button" class="admin-button admin-button--secondary" data-admin-action="edit-check" data-check="${escapeHTML(encoded)}">编辑</button>
+            <button type="button" class="admin-button admin-button--danger" data-admin-action="delete-check" data-check-id="${escapeHTML(check.id || "")}">删除</button>
+          </div>
+        </div>
+        <small>${escapeHTML(describeAdminCheck(check))}</small>
+      </article>
+    `;
+  }
+
+  function renderAdminNodeNameRow(node) {
+    const encoded = encodeURIComponent(JSON.stringify(node || {}));
+    return `
+      <article class="service-row status-surface admin-check-row" data-status="healthy">
+        <div class="admin-check-row__head">
+          <div>
+            <strong>${escapeHTML(node.effective_display_name || node.node_id || "-")}</strong>
+            <span>${escapeHTML(node.node_id || "-")}</span>
+          </div>
+          <div class="admin-check-row__actions">
+            <button type="button" class="admin-button admin-button--secondary" data-admin-action="edit-node-name" data-node="${escapeHTML(encoded)}">编辑</button>
+            ${node.display_name
+              ? `<button type="button" class="admin-button admin-button--secondary" data-admin-action="reset-node-name" data-node-id="${escapeHTML(node.node_id || "")}">恢复默认</button>`
+              : ""}
+          </div>
+        </div>
+        <small>${escapeHTML(describeAdminNodeName(node))}</small>
+      </article>
+    `;
+  }
+
+  function formatAdminNodeOption(node) {
+    const effective = node && node.effective_display_name ? node.effective_display_name : nodeLabelFrom("", node && node.node_id);
+    const nodeID = node && node.node_id ? node.node_id : "-";
+    return effective === nodeID ? nodeID : effective + " (" + nodeID + ")";
+  }
+
+  function describeAdminNodeName(node) {
+    if (!node) {
+      return "";
+    }
+    if (node.display_name) {
+      return "runtime override · " + (node.config_display_name ? "config " + node.config_display_name + " → " : "") + (node.effective_display_name || node.display_name);
+    }
+    if (node.config_display_name) {
+      return "using config display_name · " + node.config_display_name;
+    }
+    return "using node_id as the default display name";
+  }
+
+  function describeAdminCheck(check) {
+    if (!check) {
+      return "";
+    }
+    if (check.type === "systemd") {
+      return check.service_name || "";
+    }
+    if (check.type === "docker") {
+      return check.container_name || "";
+    }
+    if (check.type === "http") {
+      return (check.host_mode || "peer") + " · " + (check.scheme || "http") + "://" + ":" + (check.port || "-") + (check.path || "/");
+    }
+    if (check.type === "tcp") {
+      return "peer tcp :" + (check.port || "-");
+    }
+    return "";
+  }
+
   function renderNodeCard(node, history) {
     const summary = node.last_probe_summary || {};
     const loadLabel = Number.isFinite(Number(node.load1)) ? Number(node.load1).toFixed(2) : "-";
@@ -677,8 +1197,8 @@
       <article class="node-card status-surface" data-status="${normalizeStatus(node.status)}">
         <div class="node-card__header">
           <div>
-            <p class="eyebrow">Node ${escapeHTML(node.node_id || "-")}</p>
-            <h3>${escapeHTML(node.node_id || "-")}</h3>
+            <p class="eyebrow">Node ${escapeHTML(nodeLabel(node))}</p>
+            <h3>${escapeHTML(nodeLabel(node))}</h3>
           </div>
           <div class="node-card__actions">
             <span class="status-pill">${escapeHTML(statusLabel(node.status))}</span>
@@ -714,7 +1234,7 @@
             if (source.node_id === target.node_id) {
               return `
                 <div class="matrix__cell" data-status="self">
-                  <span>${escapeHTML(target.node_id || "-")}</span>
+                  <span>${escapeHTML(nodeLabel(target))}</span>
                   <strong>SELF</strong>
                 </div>
               `;
@@ -735,7 +1255,7 @@
 
             return `
               <div class="matrix__cell" data-status="${status}">
-                <span>${escapeHTML(target.node_id || "-")}</span>
+                <span>${escapeHTML(nodeLabel(target))}</span>
                 <strong>${label}</strong>
               </div>
             `;
@@ -744,7 +1264,7 @@
 
         return `
           <div class="matrix__row">
-            <div class="matrix__label">${escapeHTML(source.node_id || "-")}</div>
+            <div class="matrix__label">${escapeHTML(nodeLabel(source))}</div>
             ${cells}
           </div>
         `;
@@ -761,7 +1281,7 @@
     return list
       .map((incident) => {
         const eyebrow = options.showNode
-          ? (incident.node_id || "-") + " · " + (incident.rule_key || "incident")
+          ? nodeLabelFrom(incident.node_name, incident.node_id) + " · " + (incident.rule_key || "incident")
           : incident.rule_key || "incident";
         return renderTimelineItem({
           status: incident.severity || incident.status,
@@ -788,7 +1308,7 @@
           eyebrow: event.kind || "event",
           title: event.title || "未命名事件",
           description: options.compact ? truncate(event.body || "", 88) : "",
-          rightTop: event.node_id || "-",
+          rightTop: nodeLabelFrom(event.node_name, event.node_id),
           rightBottom: options.compact ? timeAgo(event.created_at) : formatDateTime(event.created_at)
         })
       )
@@ -837,7 +1357,7 @@
       .map(
         (probe) => `
           <div class="probe-row status-surface" data-status="${probeTone(probe)}">
-            <strong>${escapeHTML((probe.source_node_id || "?") + " → " + (probe.target_node_id || "?"))}</strong>
+            <strong>${escapeHTML(probePathLabel(probe))}</strong>
             <span>22 ${probe.tcp_22_ok ? "OPEN" : "DROP"}</span>
             <span>443 ${probe.tcp_443_ok ? "OPEN" : "DROP"}</span>
             <span>HTTP ${probe.http_ok ? "OK" : "MISS"}</span>
@@ -933,10 +1453,12 @@
   }
 
   function renderShell(view) {
+    activeMeta = view.meta || {};
     const localNodeHref = isUsableNodeID(view.localNodeID)
       ? "/nodes/" + encodeURIComponent(view.localNodeID)
       : "";
     const contextNodeID = view.currentNodeID || "";
+    const contextNodeName = view.currentNodeName || contextNodeID || "";
     const contextNodeHref = isUsableNodeID(contextNodeID)
       ? "/nodes/" + encodeURIComponent(contextNodeID)
       : localNodeHref;
@@ -944,19 +1466,26 @@
       ? "Node Detail"
       : view.page === "events"
         ? "Incident Center"
-        : "Command Center";
+        : view.page === "admin"
+          ? "Admin Control"
+          : "Command Center";
     const headingTitle = view.page === "node" && contextNodeID
-      ? contextNodeID
+      ? contextNodeName
       : sidebarContextLabel(view.page);
+    const adminLabel = activeMeta.is_admin ? "Admin" : "Login";
 
     return `
       <div class="obs-shell">
+        <button type="button" class="obs-sidebar-backdrop" data-sidebar-dismiss aria-label="Close navigation"></button>
         <aside class="obs-sidebar">
           <div class="obs-sidebar__brand">
             <div>
               <h1>Obsidian</h1>
               <p>vps-monitor</p>
             </div>
+            <button type="button" class="obs-sidebar__close" data-sidebar-dismiss aria-label="Close navigation">
+              ${renderIcon("close")}
+            </button>
             <span class="obs-sidebar__context">${escapeHTML(sidebarContextLabel(view.page))}</span>
           </div>
 
@@ -964,9 +1493,10 @@
             ${renderObsidianNavLink("/", "dashboard", "Observatory", view.page === "overview")}
             ${localNodeHref ? renderObsidianNavLink(localNodeHref, "dns", "Local Node", view.page === "node" && contextNodeID === view.localNodeID) : ""}
             ${contextNodeHref && contextNodeID && contextNodeID !== view.localNodeID
-              ? renderObsidianNavLink(contextNodeHref, "lan", "Node " + contextNodeID, view.page === "node")
+              ? renderObsidianNavLink(contextNodeHref, "lan", contextNodeName, view.page === "node")
               : ""}
             ${renderObsidianNavLink("/events", "warning", "Incidents", view.page === "events")}
+            ${renderObsidianNavLink("/admin", activeMeta.is_admin ? "shield_lock" : "login", adminLabel, view.page === "admin")}
           </nav>
 
           <div class="obs-sidebar__footer">
@@ -976,24 +1506,41 @@
             <div class="obs-sidebar__status">
               <div class="obs-sidebar__status-item">
                 <span>Current Node</span>
-                <strong>${escapeHTML(view.localNodeID || "-")}</strong>
+                <strong>${escapeHTML(view.localNodeName || view.localNodeID || "-")}</strong>
               </div>
               <div class="obs-sidebar__status-item">
                 <span>Leader</span>
-                <strong>${escapeHTML(view.leaderID || "Electing")}</strong>
+                <strong>${escapeHTML(view.leaderName || view.leaderID || "Electing")}</strong>
               </div>
             </div>
             <div class="obs-sidebar__links">
               <span>Self-hosted control console</span>
               <span>${escapeHTML(formatDateTime(view.generatedAt))}</span>
             </div>
+            <div class="obs-sidebar__mobile-tools">
+              <label class="obs-theme-switcher obs-theme-switcher--drawer">
+                ${renderIcon("palette")}
+                <select data-theme-select>
+                  ${renderThemeOptions()}
+                </select>
+              </label>
+              <div class="obs-topbar__operator obs-topbar__operator--drawer">
+                <span>${escapeHTML(activeMeta.is_admin ? "Admin Session" : "Cluster Leader")}</span>
+                <strong>${escapeHTML(activeMeta.is_admin ? "Authorized" : (view.leaderName || view.leaderID || "Electing"))}</strong>
+              </div>
+            </div>
           </div>
         </aside>
 
         <header class="obs-topbar">
-          <div class="obs-topbar__heading">
-            <span>${escapeHTML(headingLabel)}</span>
-            <strong>${escapeHTML(headingTitle)}</strong>
+          <div class="obs-topbar__leading">
+            <button type="button" class="obs-sidebar-toggle" data-sidebar-toggle aria-label="Open navigation">
+              ${renderIcon("menu")}
+            </button>
+            <div class="obs-topbar__heading">
+              <span>${escapeHTML(headingLabel)}</span>
+              <strong>${escapeHTML(headingTitle)}</strong>
+            </div>
           </div>
           <div class="obs-topbar__search${searchPanelOpen ? " is-open" : ""}" data-search-root>
             <label class="obs-search-field" for="global-search">
@@ -1021,8 +1568,8 @@
               </select>
             </label>
             <div class="obs-topbar__operator">
-              <span>Cluster Leader</span>
-              <strong>${escapeHTML(view.leaderID || "Electing")}</strong>
+              <span>${escapeHTML(activeMeta.is_admin ? "Admin Session" : "Cluster Leader")}</span>
+              <strong>${escapeHTML(activeMeta.is_admin ? "Authorized" : (view.leaderName || view.leaderID || "Electing"))}</strong>
             </div>
           </div>
         </header>
@@ -1030,19 +1577,6 @@
         <div class="obs-main">
           ${view.content}
         </div>
-
-        <nav class="obs-mobile-nav">
-          ${renderObsidianMobileLink("/", "grid_view", "Dashboard", view.page === "overview")}
-          ${contextNodeHref
-            ? renderObsidianMobileLink(
-                contextNodeHref,
-                "dns",
-                contextNodeID && contextNodeID !== view.localNodeID ? "Node" : "Local",
-                view.page === "node"
-              )
-            : ""}
-          ${renderObsidianMobileLink("/events", "warning", "Incidents", view.page === "events")}
-        </nav>
       </div>
     `;
   }
@@ -1209,6 +1743,7 @@
     const cpuPeak = highestNodeMetric(nodes, "cpu_pct");
     const memPeak = highestNodeMetric(nodes, "mem_pct");
     const diskPeak = highestNodeMetric(nodes, "disk_pct");
+    const leaderLabel = nodeLabelFrom(snapshot.leader_name, snapshot.leader_id);
 
     return `
       <main class="obs-page obs-page--overview">
@@ -1230,7 +1765,7 @@
             <div class="obs-hero__facts">
               <div class="obs-hero__fact">
                 <span>Leader</span>
-                <strong>${escapeHTML(snapshot.leader_id || "Electing")}</strong>
+                <strong>${escapeHTML(leaderLabel || "Electing")}</strong>
               </div>
               <div class="obs-hero__fact">
                 <span>Active Incidents</span>
@@ -1303,6 +1838,8 @@
     const tone = normalizeStatus(state.status);
     const visibility = nodeVisibilityPct(state);
     const uptimeCompact = formatUptimeCompact(state.uptime_s);
+    const nodeName = nodeLabelFrom(state.node_name, nodeID);
+    const leaderLabel = nodeLabelFrom(snapshot.leader_name, snapshot.leader_id);
 
     return `
       <main class="obs-page obs-page--node">
@@ -1310,9 +1847,9 @@
           <div class="obs-node-top__copy">
             <p class="obs-kicker">
               <span class="obs-live-dot" data-status="${tone}"></span>
-              ${escapeHTML(nodeID)} · ${escapeHTML(nodeRoleLabel(snapshot, nodeID))}
+              ${escapeHTML(nodeName)} · ${escapeHTML(nodeRoleLabel(snapshot, nodeID))}
             </p>
-            <h1>${escapeHTML(nodeID)}</h1>
+            <h1>${escapeHTML(nodeName)}</h1>
             <div class="obs-node-meta">
               <span>${renderIcon("monitor_heart")} ${escapeHTML(statusLabel(state.status))}</span>
               <span>${renderIcon("schedule")} Heartbeat ${escapeHTML(timeAgo(state.last_heartbeat_at))}</span>
@@ -1329,7 +1866,7 @@
         <section id="node-overview" class="obs-node-hero status-surface" data-status="${tone}">
           <div>
             <p class="obs-section__eyebrow">Core Node Identifier</p>
-            <h2>${escapeHTML(nodeID)}</h2>
+            <h2>${escapeHTML(nodeName)}</h2>
             <p class="obs-node-hero__reason">${escapeHTML(state.reason || "No current reason provided.")}</p>
           </div>
           <div class="obs-node-hero__score">
@@ -1406,7 +1943,7 @@
             </div>
             <div class="obs-info-grid">
               ${renderObsidianInfoCard("Uptime", formatUptimeLong(state.uptime_s))}
-              ${renderObsidianInfoCard("Leader", snapshot.leader_id || "Electing")}
+              ${renderObsidianInfoCard("Leader", leaderLabel || "Electing")}
               ${renderObsidianInfoCard("Heartbeat", timeAgo(state.last_heartbeat_at))}
               ${renderObsidianInfoCard("Peer Reach", (state.last_probe_summary.successful_peers || 0) + "/" + (state.last_probe_summary.total_peers || 0))}
             </div>
@@ -1552,7 +2089,7 @@
             if (source.node_id === target.node_id) {
               return `
                 <div class="matrix__cell" data-status="self">
-                  <span>${escapeHTML(target.node_id || "-")}</span>
+                  <span>${escapeHTML(nodeLabel(target))}</span>
                   <strong>SELF</strong>
                 </div>
               `;
@@ -1573,7 +2110,7 @@
 
             return `
               <div class="matrix__cell" data-status="${status}">
-                <span>${escapeHTML(target.node_id || "-")}</span>
+                <span>${escapeHTML(nodeLabel(target))}</span>
                 <strong>${label}</strong>
               </div>
             `;
@@ -1582,7 +2119,7 @@
 
         return `
           <div class="matrix__row" style="grid-template-columns: 96px repeat(${nodes.length}, minmax(0, 1fr));">
-            <div class="matrix__label">${escapeHTML(source.node_id || "-")}</div>
+            <div class="matrix__label">${escapeHTML(nodeLabel(source))}</div>
             ${cells}
           </div>
         `;
@@ -1601,7 +2138,7 @@
         renderTimelineItem({
           status: incident.severity || incident.status,
           eyebrow: options.showNode
-            ? (incident.node_id || "-") + " · " + (incident.rule_key || "incident")
+            ? nodeLabelFrom(incident.node_name, incident.node_id) + " · " + (incident.rule_key || "incident")
             : incident.rule_key || "incident",
           title: incident.summary || "Unnamed incident",
           description: truncate(incident.detail || "", 118),
@@ -1625,7 +2162,7 @@
           eyebrow: event.kind || "event",
           title: event.title || "Unnamed event",
           description: truncate(event.body || "", options.compact ? 84 : 132),
-          rightTop: event.node_id || "-",
+          rightTop: nodeLabelFrom(event.node_name, event.node_id),
           rightBottom: options.compact ? timeAgo(event.created_at) : formatDateTime(event.created_at)
         })
       )
@@ -1648,7 +2185,7 @@
   function renderServiceList(services) {
     const list = Array.isArray(services) ? services : [];
     if (list.length === 0) {
-      return emptyRune("No service checks", "Add systemd services in monitor.yaml to populate this section.");
+      return emptyRune("No runtime checks", "Add systemd, docker, http, or tcp checks from the admin page.");
     }
 
     return list
@@ -1657,9 +2194,9 @@
           <div class="service-row status-surface" data-status="${normalizeStatus(service.status)}">
             <div>
               <strong>${escapeHTML(service.name || "service")}</strong>
-              <span>${escapeHTML(service.status || "unknown")}</span>
+              <span>${escapeHTML((service.type || "check") + " · " + (service.status || "unknown"))}</span>
             </div>
-            <small>${escapeHTML(service.detail || "No detail")}</small>
+            <small>${escapeHTML((service.target ? service.target + " · " : "") + (service.detail || "No detail"))}</small>
           </div>
         `
       )
@@ -1676,7 +2213,7 @@
       .map(
         (probe) => `
           <div class="probe-row status-surface" data-status="${probeTone(probe)}">
-            <strong>${escapeHTML((probe.source_node_id || "?") + " → " + (probe.target_node_id || "?"))}</strong>
+            <strong>${escapeHTML(probePathLabel(probe))}</strong>
             <span>22 ${probe.tcp_22_ok ? "OPEN" : "DROP"}</span>
             <span>443 ${probe.tcp_443_ok ? "OPEN" : "DROP"}</span>
             <span>HTTP ${probe.http_ok ? "OK" : "MISS"}</span>
@@ -1824,7 +2361,7 @@
         ${list
           .map((node) => {
             const value = Math.max(8, Math.round(Number(node[metricKey]) || 0));
-            return `<i title="${escapeHTML(node.node_id || "-")}" style="height:${Math.min(100, value)}%"></i>`;
+            return `<i title="${escapeHTML(nodeLabel(node))}" style="height:${Math.min(100, value)}%"></i>`;
           })
           .join("")}
       </div>
@@ -1865,7 +2402,7 @@
           <div class="obs-node-row__icon">${renderIcon("dns", normalizeStatus(node.status) === "healthy")}</div>
           <div>
             <div class="obs-node-row__title">
-              <strong>${escapeHTML(node.node_id || "-")}</strong>
+              <strong>${escapeHTML(nodeLabel(node))}</strong>
               ${badges.join("")}
             </div>
             <p>${escapeHTML(truncate(node.reason || "No summary", 96))}</p>
@@ -1912,7 +2449,7 @@
             <p>${escapeHTML(incident.detail || "No incident detail supplied.")}</p>
           </div>
           <div class="obs-incident-hero__stats">
-            ${renderObsidianInfoCard("Node", incident.node_id || "-")}
+            ${renderObsidianInfoCard("Node", nodeLabelFrom(incident.node_name, incident.node_id))}
             ${renderObsidianInfoCard("Rule", incident.rule_key || "-")}
           </div>
         </div>
@@ -1923,7 +2460,7 @@
   function renderObsidianIncidentCard(incident) {
     return `
       <article class="obs-incident-card" data-status="${normalizeStatus(incident.severity)}">
-        <p class="obs-section__eyebrow">${escapeHTML((incident.status || "active") + " · " + (incident.node_id || "-"))}</p>
+        <p class="obs-section__eyebrow">${escapeHTML((incident.status || "active") + " · " + nodeLabelFrom(incident.node_name, incident.node_id))}</p>
         <h3>${escapeHTML(incident.summary || "Unnamed incident")}</h3>
         <p>${escapeHTML(truncate(incident.detail || "", 116))}</p>
         <div class="obs-incident-card__meta">
@@ -1958,7 +2495,7 @@
             <p>${escapeHTML(truncate(event.body || "", 120))}</p>
           </div>
           <div class="obs-event-item__meta">
-            <span>${escapeHTML(event.node_id || "-")}</span>
+            <span>${escapeHTML(nodeLabelFrom(event.node_name, event.node_id))}</span>
             <time>${escapeHTML(formatDateTime(event.created_at))}</time>
           </div>
         </article>
@@ -1987,7 +2524,7 @@
                 </div>
                 <span>${escapeHTML(incident.id || "-")}</span>
                 <span>${escapeHTML(incident.summary || "Unnamed incident")}</span>
-                <span>${escapeHTML(incident.node_id || "-")}</span>
+                <span>${escapeHTML(nodeLabelFrom(incident.node_name, incident.node_id))}</span>
                 <span>${escapeHTML(downtime)}</span>
               </article>
             `;
@@ -2008,7 +2545,7 @@
         <div class="obs-log-line" data-status="${level}">
           <span class="obs-log-line__time">${escapeHTML(formatDateTime(probe.collected_at))}</span>
           <span class="obs-log-line__level">${escapeHTML(level.toUpperCase())}</span>
-          <span class="obs-log-line__body">${escapeHTML((probe.source_node_id || "?") + " → " + (probe.target_node_id || "?") + " · 22 " + (probe.tcp_22_ok ? "OPEN" : "DROP") + " · 443 " + (probe.tcp_443_ok ? "OPEN" : "DROP") + " · HTTP " + (probe.http_ok ? "OK" : "MISS"))}</span>
+          <span class="obs-log-line__body">${escapeHTML(probePathLabel(probe) + " · 22 " + (probe.tcp_22_ok ? "OPEN" : "DROP") + " · 443 " + (probe.tcp_443_ok ? "OPEN" : "DROP") + " · HTTP " + (probe.http_ok ? "OK" : "MISS"))}</span>
         </div>
       `);
     });
@@ -2078,16 +2615,25 @@
       pinned: true,
       keywords: "incidents events alerts center"
     });
+    add({
+      kind: "View",
+      title: activeMeta.is_admin ? "Admin" : "Login",
+      subtitle: activeMeta.is_admin ? "Runtime check management" : "Administrator authentication",
+      href: "/admin",
+      icon: activeMeta.is_admin ? "shield_lock" : "login",
+      pinned: true,
+      keywords: "admin login password checks"
+    });
 
     if (isUsableNodeID(snapshot.node_id)) {
       add({
         kind: "View",
         title: "Local Node",
-        subtitle: snapshot.node_id,
+        subtitle: nodeLabelFrom(snapshot.node_name, snapshot.node_id),
         href: "/nodes/" + encodeURIComponent(snapshot.node_id),
         icon: "dns",
         pinned: true,
-        keywords: "local current node " + snapshot.node_id
+        keywords: "local current node " + nodeLabelFrom(snapshot.node_name, snapshot.node_id) + " " + snapshot.node_id
       });
     }
 
@@ -2095,11 +2641,11 @@
       add({
         kind: "View",
         title: "Current Node",
-        subtitle: currentNodeID,
+        subtitle: nodeLabelFrom(options && options.currentNodeName, currentNodeID),
         href: "/nodes/" + encodeURIComponent(currentNodeID),
         icon: "lan",
         pinned: true,
-        keywords: "current node detail " + currentNodeID
+        keywords: "current node detail " + nodeLabelFrom(options && options.currentNodeName, currentNodeID) + " " + currentNodeID
       });
     }
 
@@ -2107,12 +2653,13 @@
       const probeSummary = node.last_probe_summary || {};
       add({
         kind: "Node",
-        title: node.node_id || "-",
+        title: nodeLabel(node),
         subtitle: truncate(node.reason || statusLabel(node.status), 88),
         href: "/nodes/" + encodeURIComponent(node.node_id || ""),
         icon: "dns",
         status: normalizeStatus(node.status),
         keywords: [
+          node.node_name,
           node.node_id,
           node.reason,
           node.status,
@@ -2129,12 +2676,13 @@
       add({
         kind: "Incident",
         title: incident.summary || "Unnamed incident",
-        subtitle: (incident.node_id || "-") + " · " + (incident.rule_key || "incident"),
+        subtitle: nodeLabelFrom(incident.node_name, incident.node_id) + " · " + (incident.rule_key || "incident"),
         href: "/events",
         icon: "warning",
         status: normalizeStatus(incident.severity || incident.status),
         keywords: [
           incident.id,
+          incident.node_name,
           incident.node_id,
           incident.rule_key,
           incident.summary,
@@ -2149,12 +2697,13 @@
       add({
         kind: "Event",
         title: event.title || "Unnamed event",
-        subtitle: (event.kind || "event") + " · " + (event.node_id || "-"),
+        subtitle: (event.kind || "event") + " · " + nodeLabelFrom(event.node_name, event.node_id),
         href: "/events",
         icon: "history",
         status: normalizeStatus(event.severity),
         keywords: [
           event.kind,
+          event.node_name,
           event.node_id,
           event.title,
           event.body,
@@ -2251,7 +2800,7 @@
         continue;
       }
       if (!selected || value > selected.value) {
-        selected = { nodeID: node.node_id || "-", value: value };
+        selected = { nodeID: nodeLabel(node), nodeName: nodeLabel(node), value: value };
       }
     }
     return selected;
@@ -2281,6 +2830,25 @@
       return "ACTIVE";
     }
     return "STANDBY";
+  }
+
+  function nodeLabelFrom(name, id) {
+    const label = String(name || id || "").trim();
+    return label || "-";
+  }
+
+  function nodeLabel(node) {
+    return nodeLabelFrom(node && node.node_name, node && node.node_id);
+  }
+
+  function ingressNodeLabel(ingress) {
+    return nodeLabelFrom(ingress && ingress.active_node_name, ingress && ingress.active_node_id);
+  }
+
+  function probePathLabel(probe) {
+    return nodeLabelFrom(probe && probe.source_node_name, probe && probe.source_node_id) +
+      " → " +
+      nodeLabelFrom(probe && probe.target_node_name, probe && probe.target_node_id);
   }
 
   function formatLoad(value) {
@@ -2339,6 +2907,8 @@
 
   function sidebarContextLabel(page) {
     switch (page) {
+      case "admin":
+        return "Admin Control";
       case "events":
         return "Incident Center";
       case "node":
@@ -2413,6 +2983,275 @@
     `;
   }
 
+  async function submitAdminBootstrap(form) {
+    setAdminNotice("正在初始化管理员...", false);
+    try {
+      await requestJSON("/api/v1/admin/bootstrap", {
+        method: "POST",
+        body: {
+          password: fieldValue(form, "password")
+        }
+      });
+      setAdminNotice("管理员已初始化。", false);
+      renderRoute();
+    } catch (error) {
+      setAdminNotice(error.message || "初始化失败", true);
+    }
+  }
+
+  async function submitAdminLogin(form) {
+    setAdminNotice("正在登录...", false);
+    try {
+      await requestJSON("/api/v1/admin/login", {
+        method: "POST",
+        body: {
+          password: fieldValue(form, "password")
+        }
+      });
+      setAdminNotice("登录成功。", false);
+      renderRoute();
+    } catch (error) {
+      setAdminNotice(error.message || "登录失败", true);
+    }
+  }
+
+  async function submitAdminLogout() {
+    setAdminNotice("正在退出...", false);
+    try {
+      await requestJSON("/api/v1/admin/logout", { method: "POST" });
+      setAdminNotice("已退出。", false);
+      renderRoute();
+    } catch (error) {
+      setAdminNotice(error.message || "退出失败", true);
+    }
+  }
+
+  async function submitAdminPassword(form) {
+    setAdminNotice("正在更新密码...", false);
+    try {
+      await requestJSON("/api/v1/admin/password", {
+        method: "POST",
+        body: {
+          current_password: fieldValue(form, "current_password"),
+          new_password: fieldValue(form, "new_password")
+        }
+      });
+      form.reset();
+      setAdminNotice("密码已更新。", false);
+    } catch (error) {
+      setAdminNotice(error.message || "更新密码失败", true);
+    }
+  }
+
+  async function submitAdminCheck(form) {
+    setAdminCheckNotice("正在保存检测项...", false);
+    const payload = {
+      id: fieldValue(form, "id"),
+      name: fieldValue(form, "name"),
+      type: fieldValue(form, "type") || "systemd",
+      enabled: fieldChecked(form, "enabled"),
+      service_name: fieldValue(form, "service_name"),
+      container_name: fieldValue(form, "container_name"),
+      scheme: fieldValue(form, "scheme"),
+      host_mode: fieldValue(form, "host_mode"),
+      port: fieldNumber(form, "port"),
+      path: fieldValue(form, "path"),
+      expect_status: fieldNumber(form, "expect_status"),
+      timeout: fieldValue(form, "timeout"),
+      label: fieldValue(form, "label")
+    };
+    const method = payload.id ? "PUT" : "POST";
+    const url = payload.id ? "/api/v1/admin/checks/" + encodeURIComponent(payload.id) : "/api/v1/admin/checks";
+
+    try {
+      await requestJSON(url, {
+        method: method,
+        body: payload
+      });
+      setAdminCheckNotice("检测项已保存。", false);
+      resetAdminCheckForm();
+      renderRoute();
+    } catch (error) {
+      setAdminCheckNotice(error.message || "保存检测项失败", true);
+    }
+  }
+
+  async function submitAdminNodeName(form) {
+    const nodeID = fieldValue(form, "node_id");
+    if (!nodeID) {
+      setAdminNodeNotice("请选择节点。", true);
+      return;
+    }
+    setAdminNodeNotice("正在保存节点名称...", false);
+    try {
+      await requestJSON("/api/v1/admin/nodes/" + encodeURIComponent(nodeID), {
+        method: "PUT",
+        body: {
+          display_name: fieldValue(form, "display_name")
+        }
+      });
+      setAdminNodeNotice("节点名称已保存。", false);
+      renderRoute();
+    } catch (error) {
+      setAdminNodeNotice(error.message || "保存节点名称失败", true);
+    }
+  }
+
+  async function deleteAdminCheck(id) {
+    if (!id) {
+      return;
+    }
+    setAdminCheckNotice("正在删除检测项...", false);
+    try {
+      await requestJSON("/api/v1/admin/checks/" + encodeURIComponent(id), {
+        method: "DELETE"
+      });
+      setAdminCheckNotice("检测项已删除。", false);
+      renderRoute();
+    } catch (error) {
+      setAdminCheckNotice(error.message || "删除检测项失败", true);
+    }
+  }
+
+  async function deleteAdminNodeName(nodeID) {
+    if (!nodeID) {
+      return;
+    }
+    setAdminNodeNotice("正在恢复默认名称...", false);
+    try {
+      await requestJSON("/api/v1/admin/nodes/" + encodeURIComponent(nodeID), {
+        method: "DELETE"
+      });
+      setAdminNodeNotice("已恢复默认名称。", false);
+      renderRoute();
+    } catch (error) {
+      setAdminNodeNotice(error.message || "恢复默认名称失败", true);
+    }
+  }
+
+  function fillAdminCheckForm(encoded) {
+    const form = document.getElementById("admin-check-form");
+    if (!form || !encoded) {
+      return;
+    }
+    let check = {};
+    try {
+      check = JSON.parse(decodeURIComponent(encoded));
+    } catch (error) {
+      setAdminCheckNotice("无法读取检测项内容。", true);
+      return;
+    }
+    setFieldValue(form, "id", check.id || "");
+    setFieldValue(form, "name", check.name || "");
+    setFieldValue(form, "type", check.type || "systemd");
+    setFieldChecked(form, "enabled", check.enabled !== false);
+    setFieldValue(form, "service_name", check.service_name || "");
+    setFieldValue(form, "container_name", check.container_name || "");
+    setFieldValue(form, "scheme", check.scheme || "http");
+    setFieldValue(form, "host_mode", check.host_mode || "peer");
+    setFieldValue(form, "port", check.port || "");
+    setFieldValue(form, "path", check.path || "");
+    setFieldValue(form, "expect_status", check.expect_status || "");
+    setFieldValue(form, "timeout", check.timeout || "");
+    setFieldValue(form, "label", check.label || "");
+    syncAdminCheckForm();
+    form.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function fillAdminNodeNameForm(encoded) {
+    const form = document.getElementById("admin-node-name-form");
+    if (!form || !encoded) {
+      return;
+    }
+    let node = {};
+    try {
+      node = JSON.parse(decodeURIComponent(encoded));
+    } catch (error) {
+      setAdminNodeNotice("无法读取节点名称内容。", true);
+      return;
+    }
+    setFieldValue(form, "node_id", node.node_id || "");
+    setFieldValue(form, "display_name", node.display_name || "");
+    form.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function resetAdminCheckForm() {
+    const form = document.getElementById("admin-check-form");
+    if (!form) {
+      return;
+    }
+    form.reset();
+    setFieldValue(form, "id", "");
+    setFieldValue(form, "type", "systemd");
+    setFieldChecked(form, "enabled", true);
+    syncAdminCheckForm();
+  }
+
+  function resetAdminNodeNameForm() {
+    const form = document.getElementById("admin-node-name-form");
+    if (!form) {
+      return;
+    }
+    form.reset();
+    const select = formField(form, "node_id");
+    if (select && select.options && select.options.length > 0) {
+      select.selectedIndex = 0;
+    }
+    setFieldValue(form, "display_name", "");
+  }
+
+  function syncAdminCheckForm() {
+    const form = document.getElementById("admin-check-form");
+    if (!form) {
+      return;
+    }
+    const type = fieldValue(form, "type") || "systemd";
+    const visibleFields = {
+      systemd: ["service_name"],
+      docker: ["container_name"],
+      http: ["scheme", "host_mode", "port", "path", "expect_status", "timeout"],
+      tcp: ["port", "label"]
+    }[type] || [];
+
+    document.querySelectorAll(".admin-check-field").forEach((field) => {
+      const isVisible = visibleFields.includes(field.dataset.field || "");
+      field.hidden = !isVisible;
+    });
+  }
+
+  function formField(form, name) {
+    return form && form.elements ? form.elements.namedItem(name) : null;
+  }
+
+  function fieldValue(form, name) {
+    const field = formField(form, name);
+    return field && "value" in field ? field.value : "";
+  }
+
+  function fieldNumber(form, name) {
+    const value = fieldValue(form, name);
+    return value ? Number(value) : 0;
+  }
+
+  function fieldChecked(form, name) {
+    const field = formField(form, name);
+    return Boolean(field && field.checked);
+  }
+
+  function setFieldValue(form, name, value) {
+    const field = formField(form, name);
+    if (field && "value" in field) {
+      field.value = value;
+    }
+  }
+
+  function setFieldChecked(form, name, checked) {
+    const field = formField(form, name);
+    if (field) {
+      field.checked = Boolean(checked);
+    }
+  }
+
   async function submitTestAlert(form) {
     const result = document.getElementById("test-alert-result");
     if (result) {
@@ -2460,15 +3299,29 @@
   }
 
   async function fetchJSON(url) {
-    const response = await fetch(url, {
-      headers: {
-        Accept: "application/json"
-      }
-    });
-    if (!response.ok) {
-      throw new Error("request failed: " + response.status);
+    return requestJSON(url, { method: "GET" });
+  }
+
+  async function requestJSON(url, options) {
+    const settings = options || {};
+    const headers = {
+      Accept: "application/json"
+    };
+    let body = settings.body;
+    if (body !== undefined) {
+      headers["Content-Type"] = "application/json";
+      body = JSON.stringify(body);
     }
-    return response.json();
+    const response = await fetch(url, {
+      method: settings.method || "GET",
+      headers: headers,
+      body: body
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error || ("request failed: " + response.status));
+    }
+    return data;
   }
 
   async function fetchHistory(nodeID, metric) {
@@ -2480,10 +3333,9 @@
   }
 
   function syncThemeSelect() {
-    const select = document.querySelector("[data-theme-select]");
-    if (select) {
+    document.querySelectorAll("[data-theme-select]").forEach((select) => {
       select.value = getCurrentTheme();
-    }
+    });
   }
 
   function applyTheme(theme) {

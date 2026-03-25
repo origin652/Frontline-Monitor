@@ -30,11 +30,12 @@ type ClusterConfig struct {
 }
 
 type ClusterPeer struct {
-	NodeID     string `yaml:"node_id"`
-	APIAddr    string `yaml:"api_addr"`
-	RaftAddr   string `yaml:"raft_addr"`
-	PublicIPv4 string `yaml:"public_ipv4"`
-	Priority   int    `yaml:"priority"`
+	NodeID      string `yaml:"node_id"`
+	DisplayName string `yaml:"display_name"`
+	APIAddr     string `yaml:"api_addr"`
+	RaftAddr    string `yaml:"raft_addr"`
+	PublicIPv4  string `yaml:"public_ipv4"`
+	Priority    int    `yaml:"priority"`
 }
 
 type NetworkConfig struct {
@@ -228,11 +229,12 @@ func (c *Config) SelfPeer() ClusterPeer {
 		}
 	}
 	return ClusterPeer{
-		NodeID:     c.Cluster.NodeID,
-		APIAddr:    c.Network.ListenAddr,
-		RaftAddr:   c.Cluster.RaftAddr,
-		PublicIPv4: c.Network.PublicIPv4,
-		Priority:   c.Cluster.Priority,
+		NodeID:      c.Cluster.NodeID,
+		DisplayName: c.Cluster.NodeID,
+		APIAddr:     c.Network.ListenAddr,
+		RaftAddr:    c.Cluster.RaftAddr,
+		PublicIPv4:  c.Network.PublicIPv4,
+		Priority:    c.Cluster.Priority,
 	}
 }
 
@@ -254,6 +256,14 @@ func (c *Config) LeaderAPIAddr(leaderID string) string {
 		return ""
 	}
 	return peer.APIAddr
+}
+
+func (c *Config) PeerDisplayName(nodeID string) string {
+	peer, ok := c.PeerByID(nodeID)
+	if !ok {
+		return nodeID
+	}
+	return peer.DisplayNameOrNodeID()
 }
 
 func (c *Config) OrderedPeers() []ClusterPeer {
@@ -296,4 +306,11 @@ func parseDurationOr(raw string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return parsed
+}
+
+func (p ClusterPeer) DisplayNameOrNodeID() string {
+	if strings.TrimSpace(p.DisplayName) != "" {
+		return strings.TrimSpace(p.DisplayName)
+	}
+	return p.NodeID
 }

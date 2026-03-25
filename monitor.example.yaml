@@ -4,16 +4,19 @@ cluster:
   priority: 300
   peers:
     - node_id: node-a
+      display_name: Tokyo-1
       api_addr: 10.0.0.11:8443
       raft_addr: 10.0.0.11:7000
       public_ipv4: 203.0.113.11
       priority: 300
     - node_id: node-b
+      display_name: Singapore-1
       api_addr: 10.0.0.12:8443
       raft_addr: 10.0.0.12:7000
       public_ipv4: 203.0.113.12
       priority: 200
     - node_id: node-c
+      display_name: Frankfurt-1
       api_addr: 10.0.0.13:8443
       raft_addr: 10.0.0.13:7000
       public_ipv4: 203.0.113.13

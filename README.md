@@ -95,6 +95,8 @@ vps-monitor.exe -config monitor.local.yaml
 说明：
 
 - `cluster.peers` 需要在三台机器上保持一致，并且必须包含三台节点的 `node_id / api_addr / raft_addr / public_ipv4`
+- `cluster.peers[].display_name` 是可选字段，只影响页面和 API 展示名称，不影响 `node_id`、Raft 身份或路由
+- 管理后台可以在运行时覆盖节点显示名称；覆盖值优先于 `monitor.yaml` 里的 `display_name`
 - 如果某台机器没有 `nginx` 或 `docker`，把它从 `checks.services` / `checks.docker_checks` 里删掉，否则会长期显示 `degraded`
 - 如果暂时不接 Cloudflare，把 `cloudflare.enabled` 设为 `false`
 

@@ -55,11 +55,11 @@ func main() {
 	}
 
 	submitter := cluster.NewSubmitter(clusterManager)
-	collector := monitor.NewCollector(cfg, submitter, logger)
-	prober := monitor.NewProber(cfg, submitter, logger)
+	collector := monitor.NewCollector(cfg, sqliteStore, submitter, logger)
+	prober := monitor.NewProber(cfg, sqliteStore, submitter, logger)
 	notifiers := notify.Build(cfg, logger)
 	engineLoop := engine.New(cfg, sqliteStore, clusterManager, cloudflare.New(cfg), notifiers, logger)
-	webServer, err := web.New(cfg, sqliteStore, clusterManager, notifiers, logger)
+	webServer, err := web.New(cfg, sqliteStore, clusterManager, submitter, notifiers, logger)
 	if err != nil {
 		logger.Error("build web server failed", "error", err)
 		os.Exit(1)

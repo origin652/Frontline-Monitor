@@ -15,14 +15,16 @@ import (
 
 type Prober struct {
 	cfg    *config.Config
+	checks MonitorCheckSource
 	sink   ObservationSink
 	logger *slog.Logger
 	client *http.Client
 }
 
-func NewProber(cfg *config.Config, sink ObservationSink, logger *slog.Logger) *Prober {
+func NewProber(cfg *config.Config, checks MonitorCheckSource, sink ObservationSink, logger *slog.Logger) *Prober {
 	return &Prober{
 		cfg:    cfg,
+		checks: checks,
 		sink:   sink,
 		logger: logger,
 		client: &http.Client{
@@ -52,32 +54,41 @@ func (p *Prober) probeOnce(ctx context.Context) {
 		p.logger.Debug("skip prober tick", "reason", errNoPeers)
 		return
 	}
+	runtimeChecks := loadMonitorChecks(ctx, p.checks, p.cfg, p.logger)
 
 	for _, peer := range peers {
-		probe := p.probePeer(ctx, peer)
+		probe := p.probePeer(ctx, peer, runtimeChecks)
 		if err := p.sink.SubmitProbe(ctx, probe); err != nil {
 			p.logger.Error("submit probe failed", "target", peer.NodeID, "error", err)
 		}
 	}
 }
 
-func (p *Prober) probePeer(ctx context.Context, peer config.ClusterPeer) model.ProbeObservation {
+func (p *Prober) probePeer(ctx context.Context, peer config.ClusterPeer, checks []model.MonitorCheck) model.ProbeObservation {
 	now := time.Now().UTC()
-	ports := make([]model.PortResult, 0, len(p.cfg.Checks.TCPPorts)+2)
+	ports := make([]model.PortResult, 0, len(checks)+2)
 	sshLatency, sshOK := p.readSSHBanner(peer.PublicIPv4)
 	port22 := p.probeTCP(peer.PublicIPv4, 22)
 	port443 := p.probeTCP(peer.PublicIPv4, p.cfg.Network.PublicHTTPSPort)
 	ports = append(ports, port22, port443)
-	for _, port := range p.cfg.Checks.TCPPorts {
-		if port == 22 || port == p.cfg.Network.PublicHTTPSPort {
+	for _, check := range checks {
+		if !check.Enabled || !check.RunsAgainstPeer() {
 			continue
 		}
-		ports = append(ports, p.probeTCP(peer.PublicIPv4, port))
+		if check.Type == model.MonitorCheckTypeTCP {
+			if check.Port == 22 || check.Port == p.cfg.Network.PublicHTTPSPort {
+				continue
+			}
+			ports = append(ports, p.probeTCP(peer.PublicIPv4, check.Port))
+		}
 	}
 
-	httpChecks := make([]model.HTTPCheckResult, 0, len(p.cfg.Checks.HTTPChecks))
+	httpChecks := make([]model.HTTPCheckResult, 0, len(checks))
 	httpOK := false
-	for _, check := range p.cfg.Checks.HTTPChecks {
+	for _, check := range checks {
+		if !check.Enabled || check.Type != model.MonitorCheckTypeHTTP || !check.RunsAgainstPeer() {
+			continue
+		}
 		result := p.probeHTTP(ctx, peer.PublicIPv4, check)
 		httpChecks = append(httpChecks, result)
 		if result.OK {
@@ -146,9 +157,15 @@ func (p *Prober) readSSHBanner(host string) (int64, bool) {
 	return time.Since(start).Milliseconds(), len(line) > 0
 }
 
-func (p *Prober) probeHTTP(ctx context.Context, host string, check config.HTTPCheck) model.HTTPCheckResult {
+func (p *Prober) probeHTTP(ctx context.Context, host string, check model.MonitorCheck) model.HTTPCheckResult {
 	targetURL := fmt.Sprintf("%s://%s:%d%s", defaultScheme(check.Scheme), host, check.Port, check.Path)
-	reqCtx, cancel := context.WithTimeout(ctx, p.cfg.HTTPCheckTimeout(check))
+	reqCtx, cancel := context.WithTimeout(ctx, p.cfg.HTTPCheckTimeout(config.HTTPCheck{
+		Scheme:       check.Scheme,
+		Path:         check.Path,
+		Port:         check.Port,
+		ExpectStatus: check.ExpectStatus,
+		Timeout:      check.Timeout,
+	}))
 	defer cancel()
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, targetURL, nil)
 	if err != nil {

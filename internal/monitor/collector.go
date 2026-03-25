@@ -28,14 +28,16 @@ type ObservationSink interface {
 
 type Collector struct {
 	cfg    *config.Config
+	checks MonitorCheckSource
 	sink   ObservationSink
 	logger *slog.Logger
 	client *http.Client
 }
 
-func NewCollector(cfg *config.Config, sink ObservationSink, logger *slog.Logger) *Collector {
+func NewCollector(cfg *config.Config, checks MonitorCheckSource, sink ObservationSink, logger *slog.Logger) *Collector {
 	return &Collector{
 		cfg:    cfg,
+		checks: checks,
 		sink:   sink,
 		logger: logger,
 		client: &http.Client{Timeout: 4 * time.Second},
@@ -91,19 +93,26 @@ func (c *Collector) collect(ctx context.Context) (model.NodeHeartbeat, error) {
 		return model.NodeHeartbeat{}, fmt.Errorf("host info: %w", err)
 	}
 
-	services := make([]model.ServiceCheck, 0, len(c.cfg.Checks.Services))
-	for _, service := range c.cfg.Checks.Services {
-		services = append(services, c.checkService(ctx, service))
-	}
-
-	dockerChecks := make([]model.DockerCheck, 0, len(c.cfg.Checks.DockerChecks))
-	for _, container := range c.cfg.Checks.DockerChecks {
-		dockerChecks = append(dockerChecks, c.checkDocker(ctx, container))
-	}
-
-	httpChecks := make([]model.HTTPCheckResult, 0, len(c.cfg.Checks.HTTPChecks))
-	for _, check := range c.cfg.Checks.HTTPChecks {
-		httpChecks = append(httpChecks, c.runLocalHTTPCheck(ctx, check))
+	runtimeChecks := loadMonitorChecks(ctx, c.checks, c.cfg, c.logger)
+	services := make([]model.ServiceCheck, 0, len(runtimeChecks))
+	var dockerChecks []model.DockerCheck
+	var httpChecks []model.HTTPCheckResult
+	for _, check := range runtimeChecks {
+		if !check.Enabled || !check.RunsLocally() {
+			continue
+		}
+		switch check.Type {
+		case model.MonitorCheckTypeSystemd:
+			services = append(services, c.checkService(ctx, check))
+		case model.MonitorCheckTypeDocker:
+			service, docker := c.checkDocker(ctx, check)
+			services = append(services, service)
+			dockerChecks = append(dockerChecks, docker)
+		case model.MonitorCheckTypeHTTP:
+			service, httpResult := c.runLocalHTTPCheck(ctx, check)
+			services = append(services, service)
+			httpChecks = append(httpChecks, httpResult)
+		}
 	}
 
 	return model.NodeHeartbeat{
@@ -120,13 +129,16 @@ func (c *Collector) collect(ctx context.Context) (model.NodeHeartbeat, error) {
 	}, nil
 }
 
-func (c *Collector) checkService(ctx context.Context, service string) model.ServiceCheck {
+func (c *Collector) checkService(ctx context.Context, check model.MonitorCheck) model.ServiceCheck {
 	now := time.Now().UTC()
-	command := exec.CommandContext(ctx, "systemctl", "is-active", service)
+	command := exec.CommandContext(ctx, "systemctl", "is-active", check.ServiceName)
 	output, err := command.CombinedOutput()
 	if err != nil {
 		return model.ServiceCheck{
-			Name:      service,
+			ID:        check.ID,
+			Type:      check.Type,
+			Name:      check.Name,
+			Target:    check.ServiceName,
 			Status:    "inactive",
 			Detail:    strings.TrimSpace(string(output)),
 			UpdatedAt: now,
@@ -137,70 +149,125 @@ func (c *Collector) checkService(ctx context.Context, service string) model.Serv
 		state = "unknown"
 	}
 	return model.ServiceCheck{
-		Name:      service,
+		ID:        check.ID,
+		Type:      check.Type,
+		Name:      check.Name,
+		Target:    check.ServiceName,
 		Status:    state,
 		Detail:    state,
 		UpdatedAt: now,
 	}
 }
 
-func (c *Collector) checkDocker(ctx context.Context, container string) model.DockerCheck {
+func (c *Collector) checkDocker(ctx context.Context, check model.MonitorCheck) (model.ServiceCheck, model.DockerCheck) {
 	now := time.Now().UTC()
-	command := exec.CommandContext(ctx, "docker", "inspect", "--format", "{{.State.Status}}", container)
+	command := exec.CommandContext(ctx, "docker", "inspect", "--format", "{{.State.Status}}", check.ContainerName)
 	output, err := command.CombinedOutput()
 	if err != nil {
 		detail := strings.TrimSpace(string(output))
 		if detail == "" {
 			detail = err.Error()
 		}
-		return model.DockerCheck{
-			Name:      container,
-			Status:    "unknown",
-			Detail:    detail,
-			UpdatedAt: now,
-		}
+		return model.ServiceCheck{
+				ID:        check.ID,
+				Type:      check.Type,
+				Name:      check.Name,
+				Target:    check.ContainerName,
+				Status:    "unknown",
+				Detail:    detail,
+				UpdatedAt: now,
+			}, model.DockerCheck{
+				Name:      check.ContainerName,
+				Status:    "unknown",
+				Detail:    detail,
+				UpdatedAt: now,
+			}
 	}
 	state := strings.TrimSpace(string(output))
 	if state == "" {
 		state = "unknown"
 	}
-	return model.DockerCheck{
-		Name:      container,
-		Status:    state,
-		Detail:    state,
-		UpdatedAt: now,
-	}
+	return model.ServiceCheck{
+			ID:        check.ID,
+			Type:      check.Type,
+			Name:      check.Name,
+			Target:    check.ContainerName,
+			Status:    state,
+			Detail:    state,
+			UpdatedAt: now,
+		}, model.DockerCheck{
+			Name:      check.ContainerName,
+			Status:    state,
+			Detail:    state,
+			UpdatedAt: now,
+		}
 }
 
-func (c *Collector) runLocalHTTPCheck(ctx context.Context, check config.HTTPCheck) model.HTTPCheckResult {
+func (c *Collector) runLocalHTTPCheck(ctx context.Context, check model.MonitorCheck) (model.ServiceCheck, model.HTTPCheckResult) {
 	now := time.Now().UTC()
 	targetURL := fmt.Sprintf("%s://127.0.0.1:%d%s", defaultScheme(check.Scheme), check.Port, check.Path)
-	checkCtx, cancel := context.WithTimeout(ctx, c.cfg.HTTPCheckTimeout(check))
+	checkCtx, cancel := context.WithTimeout(ctx, c.cfg.HTTPCheckTimeout(config.HTTPCheck{
+		Scheme:       check.Scheme,
+		Path:         check.Path,
+		Port:         check.Port,
+		ExpectStatus: check.ExpectStatus,
+		Timeout:      check.Timeout,
+	}))
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(checkCtx, http.MethodGet, targetURL, nil)
 	if err != nil {
-		return model.HTTPCheckResult{Name: check.Name, URL: targetURL, CheckedAt: now}
+		return model.ServiceCheck{
+			ID:        check.ID,
+			Type:      check.Type,
+			Name:      check.Name,
+			Target:    targetURL,
+			Status:    "unknown",
+			Detail:    err.Error(),
+			UpdatedAt: now,
+		}, model.HTTPCheckResult{Name: check.Name, URL: targetURL, CheckedAt: now}
 	}
 	start := time.Now()
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return model.HTTPCheckResult{
-			Name:      check.Name,
-			URL:       targetURL,
-			OK:        false,
-			CheckedAt: now,
-		}
+		return model.ServiceCheck{
+				ID:        check.ID,
+				Type:      check.Type,
+				Name:      check.Name,
+				Target:    targetURL,
+				Status:    "failed",
+				Detail:    err.Error(),
+				UpdatedAt: now,
+			}, model.HTTPCheckResult{
+				Name:      check.Name,
+				URL:       targetURL,
+				OK:        false,
+				CheckedAt: now,
+			}
 	}
 	defer resp.Body.Close()
-	return model.HTTPCheckResult{
-		Name:       check.Name,
-		URL:        targetURL,
-		OK:         resp.StatusCode == expectedStatus(check.ExpectStatus),
-		StatusCode: resp.StatusCode,
-		LatencyMS:  time.Since(start).Milliseconds(),
-		CheckedAt:  now,
+	ok := resp.StatusCode == expectedStatus(check.ExpectStatus)
+	status := "healthy"
+	detail := fmt.Sprintf("status %d", resp.StatusCode)
+	if !ok {
+		status = "failed"
 	}
+	return model.ServiceCheck{
+			ID:        check.ID,
+			Type:      check.Type,
+			Name:      check.Name,
+			Target:    targetURL,
+			Status:    status,
+			Detail:    detail,
+			UpdatedAt: now,
+		}, model.HTTPCheckResult{
+			Name:       check.Name,
+			URL:        targetURL,
+			OK:         ok,
+			StatusCode: resp.StatusCode,
+			LatencyMS:  time.Since(start).Milliseconds(),
+			CheckedAt:  now,
+		}
 }
 
 func firstOrZero(values []float64) float64 {
