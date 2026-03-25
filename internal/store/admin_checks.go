@@ -11,15 +11,17 @@ import (
 )
 
 type monitorCheckConfig struct {
-	ServiceName   string `json:"service_name,omitempty"`
-	ContainerName string `json:"container_name,omitempty"`
-	Scheme        string `json:"scheme,omitempty"`
-	HostMode      string `json:"host_mode,omitempty"`
-	Port          int    `json:"port,omitempty"`
-	Path          string `json:"path,omitempty"`
-	ExpectStatus  int    `json:"expect_status,omitempty"`
-	Timeout       string `json:"timeout,omitempty"`
-	Label         string `json:"label,omitempty"`
+	ScopeMode     string   `json:"scope_mode,omitempty"`
+	NodeIDs       []string `json:"node_ids,omitempty"`
+	ServiceName   string   `json:"service_name,omitempty"`
+	ContainerName string   `json:"container_name,omitempty"`
+	Scheme        string   `json:"scheme,omitempty"`
+	HostMode      string   `json:"host_mode,omitempty"`
+	Port          int      `json:"port,omitempty"`
+	Path          string   `json:"path,omitempty"`
+	ExpectStatus  int      `json:"expect_status,omitempty"`
+	Timeout       string   `json:"timeout,omitempty"`
+	Label         string   `json:"label,omitempty"`
 }
 
 func (s *Store) GetAdminSettings(ctx context.Context) (*model.AdminSettings, error) {
@@ -212,6 +214,8 @@ func scanMonitorCheck(scanner interface{ Scan(dest ...any) error }) (*model.Moni
 		return nil, err
 	}
 	check.Enabled = enabled == 1
+	check.ScopeMode = cfg.ScopeMode
+	check.NodeIDs = append([]string(nil), cfg.NodeIDs...)
 	check.ServiceName = cfg.ServiceName
 	check.ContainerName = cfg.ContainerName
 	check.Scheme = cfg.Scheme
@@ -239,6 +243,8 @@ func scanMonitorCheck(scanner interface{ Scan(dest ...any) error }) (*model.Moni
 
 func marshalMonitorCheckConfig(check model.MonitorCheck) (string, error) {
 	raw, err := json.Marshal(monitorCheckConfig{
+		ScopeMode:     check.ScopeMode,
+		NodeIDs:       check.NodeIDs,
 		ServiceName:   check.ServiceName,
 		ContainerName: check.ContainerName,
 		Scheme:        check.Scheme,

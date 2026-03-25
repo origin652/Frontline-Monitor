@@ -72,7 +72,7 @@ func (p *Prober) probePeer(ctx context.Context, peer config.ClusterPeer, checks 
 	port443 := p.probeTCP(peer.PublicIPv4, p.cfg.Network.PublicHTTPSPort)
 	ports = append(ports, port22, port443)
 	for _, check := range checks {
-		if !check.Enabled || !check.RunsAgainstPeer() {
+		if !check.Enabled || !check.RunsAgainstPeer() || !check.AppliesToNode(peer.NodeID) {
 			continue
 		}
 		if check.Type == model.MonitorCheckTypeTCP {
@@ -86,7 +86,7 @@ func (p *Prober) probePeer(ctx context.Context, peer config.ClusterPeer, checks 
 	httpChecks := make([]model.HTTPCheckResult, 0, len(checks))
 	httpOK := false
 	for _, check := range checks {
-		if !check.Enabled || check.Type != model.MonitorCheckTypeHTTP || !check.RunsAgainstPeer() {
+		if !check.Enabled || check.Type != model.MonitorCheckTypeHTTP || !check.RunsAgainstPeer() || !check.AppliesToNode(peer.NodeID) {
 			continue
 		}
 		result := p.probeHTTP(ctx, peer.PublicIPv4, check)

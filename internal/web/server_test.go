@@ -150,6 +150,8 @@ func TestAdminBootstrapChecksAndRedaction(t *testing.T) {
 		"name":         "sshd",
 		"type":         "systemd",
 		"enabled":      true,
+		"scope_mode":   "include_nodes",
+		"node_ids":     []string{"node-a"},
 		"service_name": "ssh",
 	}, cookie)
 	if status != http.StatusCreated {
@@ -162,6 +164,13 @@ func TestAdminBootstrapChecksAndRedaction(t *testing.T) {
 	}
 	if len(checks) != 1 {
 		t.Fatalf("expected 1 check, got %d", len(checks))
+	}
+	if got := checks[0]["scope_mode"]; got != "include_nodes" {
+		t.Fatalf("expected scope_mode include_nodes, got %v", got)
+	}
+	nodeIDs, ok := checks[0]["node_ids"].([]any)
+	if !ok || len(nodeIDs) != 1 || nodeIDs[0] != "node-a" {
+		t.Fatalf("expected node_ids [node-a], got %#v", checks[0]["node_ids"])
 	}
 
 	_, err = manager.Apply(context.Background(), cluster.CommandIngress, model.IngressState{

@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 )
@@ -14,6 +15,9 @@ const (
 
 	MonitorCheckHostModeLocal = "local"
 	MonitorCheckHostModePeer  = "peer"
+	MonitorCheckScopeAll      = "all"
+	MonitorCheckScopeInclude  = "include_nodes"
+	MonitorCheckScopeExclude  = "exclude_nodes"
 )
 
 type MonitorCheck struct {
@@ -22,6 +26,8 @@ type MonitorCheck struct {
 	Name          string    `json:"name"`
 	Enabled       bool      `json:"enabled"`
 	SortOrder     int       `json:"sort_order"`
+	ScopeMode     string    `json:"scope_mode,omitempty"`
+	NodeIDs       []string  `json:"node_ids,omitempty"`
 	ServiceName   string    `json:"service_name,omitempty"`
 	ContainerName string    `json:"container_name,omitempty"`
 	Scheme        string    `json:"scheme,omitempty"`
@@ -42,14 +48,19 @@ func (c MonitorCheck) Normalize() MonitorCheck {
 	c.ContainerName = strings.TrimSpace(c.ContainerName)
 	c.Scheme = strings.TrimSpace(strings.ToLower(c.Scheme))
 	c.HostMode = strings.TrimSpace(strings.ToLower(c.HostMode))
+	c.ScopeMode = strings.TrimSpace(strings.ToLower(c.ScopeMode))
 	c.Path = strings.TrimSpace(c.Path)
 	c.Timeout = strings.TrimSpace(c.Timeout)
 	c.Label = strings.TrimSpace(c.Label)
+	c.NodeIDs = normalizeMonitorCheckNodeIDs(c.NodeIDs)
 	if c.Scheme == "" {
 		c.Scheme = "http"
 	}
 	if c.Type == MonitorCheckTypeHTTP && c.HostMode == "" {
 		c.HostMode = MonitorCheckHostModePeer
+	}
+	if c.ScopeMode == "" {
+		c.ScopeMode = MonitorCheckScopeAll
 	}
 	if c.Path == "" && c.Type == MonitorCheckTypeHTTP {
 		c.Path = "/"
@@ -61,6 +72,15 @@ func (c MonitorCheck) Validate() error {
 	c = c.Normalize()
 	if c.Name == "" {
 		return fmt.Errorf("name is required")
+	}
+	switch c.ScopeMode {
+	case MonitorCheckScopeAll:
+	case MonitorCheckScopeInclude, MonitorCheckScopeExclude:
+		if len(c.NodeIDs) == 0 {
+			return fmt.Errorf("node_ids is required when scope_mode is %s", c.ScopeMode)
+		}
+	default:
+		return fmt.Errorf("unsupported scope_mode %q", c.ScopeMode)
 	}
 	switch c.Type {
 	case MonitorCheckTypeSystemd:
@@ -101,6 +121,19 @@ func (c MonitorCheck) RunsAgainstPeer() bool {
 		(c.Type == MonitorCheckTypeHTTP && c.HostMode == MonitorCheckHostModePeer)
 }
 
+func (c MonitorCheck) AppliesToNode(nodeID string) bool {
+	c = c.Normalize()
+	nodeID = strings.TrimSpace(nodeID)
+	switch c.ScopeMode {
+	case MonitorCheckScopeInclude:
+		return slices.Contains(c.NodeIDs, nodeID)
+	case MonitorCheckScopeExclude:
+		return !slices.Contains(c.NodeIDs, nodeID)
+	default:
+		return true
+	}
+}
+
 func (c MonitorCheck) TargetLabel() string {
 	c = c.Normalize()
 	switch c.Type {
@@ -118,4 +151,25 @@ func (c MonitorCheck) TargetLabel() string {
 	default:
 		return ""
 	}
+}
+
+func normalizeMonitorCheckNodeIDs(nodeIDs []string) []string {
+	if len(nodeIDs) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(nodeIDs))
+	normalized := make([]string, 0, len(nodeIDs))
+	for _, nodeID := range nodeIDs {
+		trimmed := strings.TrimSpace(nodeID)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		normalized = append(normalized, trimmed)
+	}
+	slices.Sort(normalized)
+	return normalized
 }

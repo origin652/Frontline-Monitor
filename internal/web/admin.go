@@ -231,6 +231,10 @@ func (s *Server) handleAdminChecks(w http.ResponseWriter, r *http.Request) {
 			s.renderError(w, http.StatusBadRequest, err)
 			return
 		}
+		if err := s.validateMonitorCheckScope(check); err != nil {
+			s.renderError(w, http.StatusBadRequest, err)
+			return
+		}
 		if err := s.submitter.Apply(r.Context(), cluster.CommandMonitorCheck, check); err != nil {
 			s.renderError(w, http.StatusInternalServerError, err)
 			return
@@ -265,6 +269,10 @@ func (s *Server) handleAdminCheckByID(w http.ResponseWriter, r *http.Request) {
 		}
 		check.UpdatedAt = time.Now().UTC()
 		if err := check.Validate(); err != nil {
+			s.renderError(w, http.StatusBadRequest, err)
+			return
+		}
+		if err := s.validateMonitorCheckScope(check); err != nil {
 			s.renderError(w, http.StatusBadRequest, err)
 			return
 		}
@@ -477,4 +485,13 @@ func normalizeNodeDisplayName(displayName string) (string, error) {
 		return "", fmt.Errorf("display_name must be at most %d characters", maxNodeDisplayNameRunes)
 	}
 	return displayName, nil
+}
+
+func (s *Server) validateMonitorCheckScope(check model.MonitorCheck) error {
+	for _, nodeID := range check.NodeIDs {
+		if _, ok := s.cfg.PeerByID(nodeID); !ok {
+			return fmt.Errorf("unknown node %q in node_ids", nodeID)
+		}
+	}
+	return nil
 }

@@ -98,7 +98,7 @@ func (c *Collector) collect(ctx context.Context) (model.NodeHeartbeat, error) {
 	var dockerChecks []model.DockerCheck
 	var httpChecks []model.HTTPCheckResult
 	for _, check := range runtimeChecks {
-		if !check.Enabled || !check.RunsLocally() {
+		if !check.Enabled || !check.RunsLocally() || !check.AppliesToNode(c.cfg.Cluster.NodeID) {
 			continue
 		}
 		switch check.Type {

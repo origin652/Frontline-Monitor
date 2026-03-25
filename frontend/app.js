@@ -6,11 +6,235 @@
 
   const REFRESH_INTERVAL_MS = 15000;
   const THEME_KEY = "vps-monitor-theme";
+  const LANGUAGE_KEY = "vps-monitor-language";
   const THEMES = [
     { id: "graphite", label: "Graphite" },
     { id: "porcelain", label: "Porcelain" },
     { id: "brass", label: "Brass" }
   ];
+  const LANGUAGES = [
+    { id: "zh", label: "中文" },
+    { id: "en", label: "English" }
+  ];
+  const UI_TEXT = {
+    zh: {
+      "Observatory": "总览",
+      "Local Node": "本机节点",
+      "Incidents": "事件",
+      "Admin Control": "管理",
+      "Admin": "管理",
+      "Login": "登录",
+      "Command Center": "控制台",
+      "Node Detail": "节点详情",
+      "Incident Center": "事件中心",
+      "Open Local Node": "打开本机节点",
+      "Current Node": "当前节点",
+      "Leader": "Leader",
+      "Self-hosted control console": "自托管控制台",
+      "Admin Session": "管理员会话",
+      "Cluster Leader": "集群 Leader",
+      "Authorized": "已授权",
+      "Electing": "选举中",
+      "Quick Access": "快速访问",
+      "No Matches": "没有匹配项",
+      "Search nodes, incidents, or telemetry...": "搜索节点、事件或观测数据...",
+      "Type a node ID, incident summary, rule key, status, or event title.": "输入节点 ID、事件摘要、规则键、状态或事件标题。",
+      "Authentication": "认证",
+      "Bootstrap": "初始化",
+      "Session": "会话",
+      "Password": "密码",
+      "Current Password": "当前密码",
+      "New Password": "新密码",
+      "Runtime Checks": "运行时检测",
+      "Current Checks": "当前检测项",
+      "Node Names": "节点名称",
+      "Current Names": "当前名称",
+      "Name": "名称",
+      "Type": "类型",
+      "Node Scope": "节点范围",
+      "All nodes": "全部节点",
+      "Only selected nodes": "仅选中节点",
+      "All except selected nodes": "排除选中节点",
+      "Target Nodes": "目标节点",
+      "Service Name": "服务名",
+      "Container Name": "容器名",
+      "Scheme": "协议",
+      "Host Mode": "主机模式",
+      "Port": "端口",
+      "Path": "路径",
+      "Expect Status": "期望状态码",
+      "Timeout": "超时",
+      "Label": "标签",
+      "Enabled": "启用",
+      "Node": "节点",
+      "Node ": "节点 ",
+      "Display Name": "显示名称",
+      "No checks yet": "还没有检测项",
+      "Create the first runtime check to replace static monitor.yaml service lists.": "先创建第一条运行时检测项，用来替代静态 monitor.yaml 服务列表。",
+      "No nodes configured": "还没有配置节点",
+      "Cluster peers will appear here after configuration loads.": "配置加载完成后，集群节点会出现在这里。",
+      "System Stable": "系统稳定",
+      "Cluster Timeline": "集群时间线",
+      "Manual Dispatch": "手动派发",
+      "Closed Incident History": "已关闭事件历史",
+      "Active Critical": "活跃严重",
+      "Degraded": "降级",
+      "Active Incidents": "活跃事件",
+      "Updated": "更新时间",
+      "Loading": "加载中",
+      "Unavailable": "不可用",
+      "Deployment Nodes": "部署节点",
+      "Active Deployment Nodes": "活跃部署节点",
+      "Node Identity": "节点标识",
+      "Status": "状态",
+      "Peer Reach": "互探可达",
+      "Heartbeat": "心跳",
+      "Uptime": "运行时间",
+      "Action": "操作",
+      "View": "视图",
+      "Incident": "事件",
+      "Event": "事件流",
+      "enabled": "启用",
+      "disabled": "禁用",
+      "administrator already initialized": "管理员已经初始化",
+      "administrator is not initialized": "管理员尚未初始化",
+      "invalid password": "密码错误",
+      "current password is invalid": "当前密码错误",
+      "admin login required": "需要管理员登录",
+      "Language": "语言"
+    },
+    en: {
+      "总览": "Overview",
+      "管理": "Admin",
+      "事件": "Events",
+      "节点 ": "Node ",
+      "未找到页面": "Page Not Found",
+      "加载中": "Loading",
+      "不可用": "Unavailable",
+      "加载失败": "Load Failed",
+      "接口请求失败。": "API request failed.",
+      "页面不存在": "Page Not Found",
+      "这个路径没有对应的前端页面。": "There is no frontend page for this path.",
+      "入口当前指向 ": "Ingress currently points to ",
+      "入口正在等待新的 active node": "Ingress is waiting for a new active node",
+      "Ingress 节点": "Ingress Node",
+      "待选举": "Pending",
+      "当前对外流量落点": "Current external traffic target",
+      "DNS 同步": "DNS Sync",
+      "已同步": "Synced",
+      "待同步": "Pending",
+      "尚未同步": "Not synced yet",
+      "活跃 Incident": "Active Incidents",
+      "当前需要处理的异常": "Issues needing attention now",
+      "Critical 节点": "Critical Nodes",
+      "Ingress IP": "Ingress IP",
+      "期望的对外地址": "Desired public address",
+      "最近事件": "Recent Events",
+      "这一轮同步写入的轨迹": "Events written in this sync round",
+      "节点主舞台": "Node Stage",
+      "节点健康主舞台": "Node Health Stage",
+      "节点互探矩阵": "Peer Probe Matrix",
+      "活跃 Incident": "Active Incidents",
+      "现在最该处理的异常": "Highest-priority active issues",
+      "当前没有活动 incident": "No Active Incidents",
+      "最近状态轨迹": "Recent State Timeline",
+      "还没有事件": "No Events Yet",
+      "节点档案": "Node Profile",
+      "无说明": "No details",
+      "最后一次心跳": "Last heartbeat",
+      "当前决策节点": "Current decision node",
+      "当前入口角色": "Current ingress role",
+      "近期历史长度": "Recent history size",
+      "判定证据": "Decision Evidence",
+      "为什么它会被判成现在这样": "Why it is classified this way",
+      "展开原始观测证据": "Expand raw observation evidence",
+      "资源曲线": "Resource Curves",
+      "资源曲线与当前占用": "Resource Curves and Current Usage",
+      "服务": "Services",
+      "关键服务面": "Critical Service Surface",
+      "互探轨迹": "Probe Trail",
+      "互探路径证据": "Probe Path Evidence",
+      "Incident 历史": "Incident History",
+      "这个节点最近发生过什么": "What happened on this node recently",
+      "这个节点还没有 incident 历史": "This node has no incident history yet",
+      "事件时间线": "Event Timeline",
+      "从事件流看集群如何做决定": "How the cluster decides from the event stream",
+      "当前入口落点": "Current ingress target",
+      "域名回源状态": "DNS origin status",
+      "当前仍在打开的异常": "Incidents still open",
+      "最近一次采样保留下来的轨迹": "Events kept from the latest sampling round",
+      "告警测试": "Alert Test",
+      "手动打一次告警": "Trigger a Manual Alert",
+      "Incident 轨迹": "Incident Timeline",
+      "问题如何打开与恢复": "How incidents opened and recovered",
+      "集群事件": "Cluster Events",
+      "Leader、DNS 与状态切换": "Leader, DNS, and state transitions",
+      "事件流暂时空着": "Event stream is empty",
+      "设置管理员密码": "Set Administrator Password",
+      "初始化管理员": "Initialize Admin",
+      "管理员登录": "Admin Login",
+      "登录": "Login",
+      "管理员会话": "Admin Session",
+      "退出登录": "Log Out",
+      "修改管理员密码": "Change Admin Password",
+      "更新密码": "Update Password",
+      "检测项编辑器": "Check Editor",
+      "保存检测项": "Save Check",
+      "清空": "Clear",
+      "已生效检测项": "Active Checks",
+      "节点显示名称": "Node Display Names",
+      "保存节点名称": "Save Node Name",
+      "当前节点名称映射": "Current Node Name Mappings",
+      "编辑": "Edit",
+      "删除": "Delete",
+      "恢复默认": "Reset",
+      "进入节点": "Open Node",
+      "暂无节点数据": "No Node Data Yet",
+      "未命名 incident": "Unnamed incident",
+      "未命名事件": "Unnamed event",
+      "没有配置服务检查": "No Service Checks Configured",
+      "还没有探测数据": "No Probe Data Yet",
+      "没有启用任何告警渠道": "No Alert Channels Enabled",
+      "渠道": "Channel",
+      "备注": "Note",
+      "发送测试告警": "Send Test Alert",
+      "管理员已初始化。": "Administrator initialized.",
+      "初始化失败": "Initialization failed",
+      "正在初始化管理员...": "Initializing administrator...",
+      "正在登录...": "Signing in...",
+      "登录成功。": "Login successful.",
+      "登录失败": "Login failed",
+      "正在退出...": "Signing out...",
+      "已退出。": "Logged out.",
+      "退出失败": "Logout failed",
+      "正在更新密码...": "Updating password...",
+      "密码已更新。": "Password updated.",
+      "更新密码失败": "Password update failed",
+      "正在保存检测项...": "Saving check...",
+      "检测项已保存。": "Check saved.",
+      "保存检测项失败": "Failed to save check",
+      "请选择节点。": "Select a node.",
+      "正在保存节点名称...": "Saving node name...",
+      "节点名称已保存。": "Node name saved.",
+      "保存节点名称失败": "Failed to save node name",
+      "正在删除检测项...": "Deleting check...",
+      "检测项已删除。": "Check deleted.",
+      "删除检测项失败": "Failed to delete check",
+      "正在恢复默认名称...": "Restoring default name...",
+      "已恢复默认名称。": "Default name restored.",
+      "恢复默认名称失败": "Failed to restore default name",
+      "无法读取检测项内容。": "Unable to read check data.",
+      "无法读取节点名称内容。": "Unable to read node name data.",
+      "正在发送测试告警...": "Sending test alert...",
+      "发送时间 ": "Sent at ",
+      "留空则恢复默认名称": "Leave empty to restore the default name",
+      "等待第一轮评估产出规则命中信息。": "Waiting for the first evaluation pass to produce rule-hit evidence.",
+      "先在 monitor.yaml 里开启 Telegram、SMTP 或 webhook 之后，这里才会出现测试入口。": "Enable Telegram, SMTP, or webhook in monitor.yaml first. The test entry point appears after that.",
+      "这条消息用于验证 Telegram / SMTP 是否真的能送达。": "Use this note to verify Telegram or SMTP delivery.",
+      "这里只会发送测试消息，不会创建真实 incident。": "This only sends a test message. It does not create a real incident.",
+      "Language": "Language"
+    }
+  };
 
   let refreshTimer = 0;
   let renderToken = 0;
@@ -33,6 +257,7 @@
   window.addEventListener("resize", handleWindowResize);
 
   applyTheme(document.documentElement.dataset.theme || document.body.dataset.defaultTheme || "graphite");
+  applyLanguage(getStoredLanguage());
   renderRoute();
 
   function handleDocumentClick(event) {
@@ -91,13 +316,18 @@
   }
 
   function handleDocumentChange(event) {
-    if (!event.target.matches("[data-theme-select]")) {
-      if (event.target.matches("[data-check-type]")) {
-        syncAdminCheckForm();
-      }
+    if (event.target.matches("[data-theme-select]")) {
+      applyTheme(event.target.value);
       return;
     }
-    applyTheme(event.target.value);
+    if (event.target.matches("[data-language-select]")) {
+      applyLanguage(event.target.value);
+      renderRoute();
+      return;
+    }
+    if (event.target.matches("[data-check-type]") || event.target.matches("[data-check-scope]")) {
+      syncAdminCheckForm();
+    }
   }
 
   function handleDocumentInput(event) {
@@ -208,7 +438,7 @@
       return;
     }
     node.className = "admin-notice" + (isError ? " is-error" : "");
-    node.textContent = message || "";
+    node.textContent = localizeText(message || "");
   }
 
   function setAdminCheckNotice(message, isError) {
@@ -217,7 +447,7 @@
       return;
     }
     node.className = "admin-notice" + (isError ? " is-error" : "");
-    node.textContent = message || "";
+    node.textContent = localizeText(message || "");
   }
 
   function setAdminNodeNotice(message, isError) {
@@ -226,7 +456,7 @@
       return;
     }
     node.className = "admin-notice" + (isError ? " is-error" : "");
-    node.textContent = message || "";
+    node.textContent = localizeText(message || "");
   }
 
   function handleAdminAction(button) {
@@ -273,15 +503,16 @@
       currentSearchItems = [];
       currentSearchQuery = "";
       searchPanelOpen = false;
-      app.innerHTML = renderShell({
+      app.innerHTML = localizeMarkup(renderShell({
         page: route.page,
         title: routeTitle(route),
         localNodeID: "...",
         leaderID: "加载中",
         generatedAt: new Date().toISOString(),
         content: renderStatePanel("加载中", "正在从 API 拉取最新集群状态。", route)
-      });
+      }));
       syncThemeSelect();
+      syncLanguageSelect();
       syncSidebarDrawer();
     }
 
@@ -291,15 +522,16 @@
         return;
       }
 
-      document.title = view.title + " · VPS Monitor";
+      document.title = formatDocumentTitle(view.title);
       currentSearchItems = Array.isArray(view.searchIndex) ? view.searchIndex : [];
       if (!backgroundRefresh) {
         currentSearchQuery = "";
         searchPanelOpen = false;
       }
-      app.innerHTML = renderShell(view);
+      app.innerHTML = localizeMarkup(renderShell(view));
       lastRouteKey = routeKey;
       syncThemeSelect();
+      syncLanguageSelect();
       syncSearchUI();
       syncAdminCheckForm();
       syncSidebarDrawer();
@@ -314,11 +546,11 @@
         return;
       }
 
-      document.title = routeTitle(route) + " · VPS Monitor";
+      document.title = formatDocumentTitle(routeTitle(route));
       currentSearchItems = [];
       currentSearchQuery = "";
       searchPanelOpen = false;
-      app.innerHTML = renderShell({
+      app.innerHTML = localizeMarkup(renderShell({
         page: route.page,
         title: routeTitle(route),
         localNodeID: "-",
@@ -326,9 +558,10 @@
         meta: activeMeta,
         generatedAt: new Date().toISOString(),
         content: renderStatePanel("加载失败", error.message || "接口请求失败。", route)
-      });
+      }));
       lastRouteKey = routeKey;
       syncThemeSelect();
+      syncLanguageSelect();
       syncSearchUI();
       syncSidebarDrawer();
       scheduleRefresh();
@@ -378,6 +611,56 @@
       return "unknown";
     }
     return route.page + ":" + (route.nodeID || "");
+  }
+
+  function getStoredLanguage() {
+    try {
+      return window.localStorage.getItem(LANGUAGE_KEY) || "zh";
+    } catch (error) {
+      return "zh";
+    }
+  }
+
+  function applyLanguage(language) {
+    const nextLanguage = LANGUAGES.some((item) => item.id === language) ? language : "zh";
+    document.documentElement.lang = nextLanguage === "en" ? "en" : "zh-CN";
+    document.documentElement.dataset.language = nextLanguage;
+    try {
+      window.localStorage.setItem(LANGUAGE_KEY, nextLanguage);
+    } catch (error) {
+      // Ignore storage failures.
+    }
+    return nextLanguage;
+  }
+
+  function getCurrentLanguage() {
+    return document.documentElement.dataset.language || "zh";
+  }
+
+  function renderLanguageOptions() {
+    const selectedLanguage = getCurrentLanguage();
+    return LANGUAGES.map((language) => {
+      const selected = language.id === selectedLanguage ? " selected" : "";
+      return `<option value="${language.id}"${selected}>${language.label}</option>`;
+    }).join("");
+  }
+
+  function localizeText(text) {
+    let output = String(text == null ? "" : text);
+    const replacements = UI_TEXT[getCurrentLanguage()] || {};
+    const entries = Object.entries(replacements).sort((a, b) => b[0].length - a[0].length);
+    for (const [source, target] of entries) {
+      output = output.split(source).join(target);
+    }
+    return output;
+  }
+
+  function localizeMarkup(markup) {
+    return localizeText(markup);
+  }
+
+  function formatDocumentTitle(title) {
+    return localizeText(title) + " · VPS Monitor";
   }
 
   function resolveRoute(pathname) {
@@ -626,7 +909,7 @@
             ${renderSummaryCard("Ingress 节点", snapshot.ingress && snapshot.ingress.active_node_id ? ingressNodeLabel(snapshot.ingress) : "待选举", "当前对外流量落点")}
             ${renderSummaryCard("DNS 同步", snapshot.ingress && snapshot.ingress.dns_synced ? "已同步" : "待同步", snapshot.ingress && snapshot.ingress.dns_synced_at ? timeAgo(snapshot.ingress.dns_synced_at) : "尚未同步")}
             ${renderSummaryCard("活跃 Incident", String(incidents.length), "当前需要处理的异常")}
-            ${renderSummaryCard("Critical 节点", String(counts.critical), counts.healthy + " 个节点处于稳定状态")}
+            ${renderSummaryCard("Critical 节点", String(counts.critical), formatStableNodesSummary(counts.healthy))}
             ${renderSummaryCard("Ingress IP", snapshot.ingress && snapshot.ingress.desired_ip ? snapshot.ingress.desired_ip : "-", "期望的对外地址")}
             ${renderSummaryCard("最近事件", String(events.length), "这一轮同步写入的轨迹")}
           </div>
@@ -765,7 +1048,7 @@
                 <p class="eyebrow">服务</p>
                 <h3>关键服务面</h3>
               </div>
-              <p>${serviceIssues} 项服务处于异常或不稳定状态。</p>
+              <p>${formatServiceIssueSummary(serviceIssues)}</p>
             </div>
             <div class="service-list">
               ${renderServiceList(services)}
@@ -778,7 +1061,7 @@
                 <p class="eyebrow">互探轨迹</p>
                 <h3>互探路径证据</h3>
               </div>
-              <p>最近 ${probes.length} 条观测，直接用来判断从哪一层开始失真。</p>
+              <p>${formatProbeObservationSummary(probes.length)}</p>
             </div>
             <div class="probe-trail">
               ${renderProbeList(probes)}
@@ -996,6 +1279,14 @@
                   <option value="tcp">tcp</option>
                 </select>
               </label>
+              <label>
+                <span>Node Scope</span>
+                <select name="scope_mode" data-check-scope>
+                  <option value="all">All nodes</option>
+                  <option value="include_nodes">Only selected nodes</option>
+                  <option value="exclude_nodes">All except selected nodes</option>
+                </select>
+              </label>
               <label class="admin-check-field" data-field="service_name">
                 <span>Service Name</span>
                 <input type="text" name="service_name">
@@ -1038,6 +1329,17 @@
                 <span>Label</span>
                 <input type="text" name="label">
               </label>
+              <fieldset class="admin-check-field admin-check-scope-field" data-field="node_ids">
+                <legend>Target Nodes</legend>
+                <div class="admin-node-scope-list">
+                  ${nodeList.map((node) => `
+                    <label class="admin-node-scope-item">
+                      <input type="checkbox" name="node_ids" value="${escapeHTML(node.node_id || "")}">
+                      <span>${escapeHTML(formatAdminNodeOption(node))}</span>
+                    </label>
+                  `).join("")}
+                </div>
+              </fieldset>
               <label class="admin-toggle">
                 <input type="checkbox" name="enabled" checked>
                 <span>Enabled</span>
@@ -1162,31 +1464,59 @@
       return "";
     }
     if (node.display_name) {
-      return "runtime override · " + (node.config_display_name ? "config " + node.config_display_name + " → " : "") + (node.effective_display_name || node.display_name);
+      return getCurrentLanguage() === "en"
+        ? "runtime override · " + (node.config_display_name ? "config " + node.config_display_name + " -> " : "") + (node.effective_display_name || node.display_name)
+        : "运行时覆盖 · " + (node.config_display_name ? "配置 " + node.config_display_name + " -> " : "") + (node.effective_display_name || node.display_name);
     }
     if (node.config_display_name) {
-      return "using config display_name · " + node.config_display_name;
+      return getCurrentLanguage() === "en"
+        ? "using config display_name · " + node.config_display_name
+        : "使用配置 display_name · " + node.config_display_name;
     }
-    return "using node_id as the default display name";
+    return getCurrentLanguage() === "en"
+      ? "using node_id as the default display name"
+      : "使用 node_id 作为默认显示名称";
   }
 
   function describeAdminCheck(check) {
     if (!check) {
       return "";
     }
+    const scope = describeAdminCheckScope(check);
     if (check.type === "systemd") {
-      return check.service_name || "";
+      return [check.service_name || "", scope].filter(Boolean).join(" · ");
     }
     if (check.type === "docker") {
-      return check.container_name || "";
+      return [check.container_name || "", scope].filter(Boolean).join(" · ");
     }
     if (check.type === "http") {
-      return (check.host_mode || "peer") + " · " + (check.scheme || "http") + "://" + ":" + (check.port || "-") + (check.path || "/");
+      return [
+        (check.host_mode || "peer") + " · " + (check.scheme || "http") + "://" + ":" + (check.port || "-") + (check.path || "/"),
+        scope
+      ].filter(Boolean).join(" · ");
     }
     if (check.type === "tcp") {
-      return "peer tcp :" + (check.port || "-");
+      return ["peer tcp :" + (check.port || "-"), scope].filter(Boolean).join(" · ");
     }
     return "";
+  }
+
+  function describeAdminCheckScope(check) {
+    if (!check) {
+      return "";
+    }
+    const nodeIDs = Array.isArray(check.node_ids) ? check.node_ids.filter(Boolean) : [];
+    if (check.scope_mode === "include_nodes") {
+      return nodeIDs.length > 0
+        ? (getCurrentLanguage() === "en" ? "only " : "仅 ") + nodeIDs.join(", ")
+        : (getCurrentLanguage() === "en" ? "no nodes selected" : "未选择节点");
+    }
+    if (check.scope_mode === "exclude_nodes") {
+      return nodeIDs.length > 0
+        ? (getCurrentLanguage() === "en" ? "except " : "排除 ") + nodeIDs.join(", ")
+        : (getCurrentLanguage() === "en" ? "all nodes" : "全部节点");
+    }
+    return getCurrentLanguage() === "en" ? "all nodes" : "全部节点";
   }
 
   function renderNodeCard(node, history) {
@@ -1519,6 +1849,12 @@
             </div>
             <div class="obs-sidebar__mobile-tools">
               <label class="obs-theme-switcher obs-theme-switcher--drawer">
+                ${renderIcon("translate")}
+                <select data-language-select aria-label="Language">
+                  ${renderLanguageOptions()}
+                </select>
+              </label>
+              <label class="obs-theme-switcher obs-theme-switcher--drawer">
                 ${renderIcon("palette")}
                 <select data-theme-select>
                   ${renderThemeOptions()}
@@ -1561,6 +1897,12 @@
           </div>
           <div class="obs-topbar__actions">
             ${renderObsidianMeta("Updated", formatDateTime(view.generatedAt))}
+            <label class="obs-theme-switcher" for="language-select">
+              ${renderIcon("translate")}
+              <select id="language-select" data-language-select aria-label="Language">
+                ${renderLanguageOptions()}
+              </select>
+            </label>
             <label class="obs-theme-switcher" for="theme-select">
               ${renderIcon("palette")}
               <select id="theme-select" data-theme-select>
@@ -1807,7 +2149,7 @@
               <p class="obs-section__eyebrow">Deployment Nodes</p>
               <h2>Active Deployment Nodes</h2>
             </div>
-            <p>${escapeHTML(nodes.length + " nodes · " + counts.healthy + " stable · " + activeIncidents + " active incidents")}</p>
+            <p>${escapeHTML(formatFleetSummary(nodes.length, counts.healthy, activeIncidents))}</p>
           </div>
           <div class="obs-node-table">
             <div class="obs-node-table__head">
@@ -2719,29 +3061,37 @@
     if (!Array.isArray(nodes) || nodes.length === 0) {
       return {
         tone: "unknown",
-        word: "WAITING",
-        description: "The dashboard is ready. It will settle once the first node reports telemetry."
+        word: getCurrentLanguage() === "en" ? "WAITING" : "等待",
+        description: getCurrentLanguage() === "en"
+          ? "The dashboard is ready. It will settle once the first node reports telemetry."
+          : "面板已经准备好，等第一台节点上报遥测后就会稳定下来。"
       };
     }
     const total = nodes.length;
     if (counts.critical > 0 || incidents.some((incident) => normalizeStatus(incident.severity) === "critical")) {
       return {
         tone: "critical",
-        word: "ALERT",
-        description: "Critical nodes or incidents are open. Start with the failing node, then verify ingress and peer visibility."
+        word: getCurrentLanguage() === "en" ? "ALERT" : "告警",
+        description: getCurrentLanguage() === "en"
+          ? "Critical nodes or incidents are open. Start with the failing node, then verify ingress and peer visibility."
+          : "存在严重节点或未恢复事件。先处理异常节点，再确认 ingress 与互探可见性。"
       };
     }
     if (counts.degraded > 0 || activeIncidentCount(incidents) > 0) {
       return {
         tone: "degraded",
-        word: "DEGRADED",
-        description: "The cluster is still serving, but at least one layer is thinning. Review degraded nodes before the next transition escalates."
+        word: getCurrentLanguage() === "en" ? "DEGRADED" : "降级",
+        description: getCurrentLanguage() === "en"
+          ? "The cluster is still serving, but at least one layer is thinning. Review degraded nodes before the next transition escalates."
+          : "集群仍在服务，但至少有一层正在变薄。请在下一次升级前先检查降级节点。"
       };
     }
     return {
       tone: "healthy",
-      word: "STABLE",
-      description: "All " + total + " nodes are within expected thresholds. No active incidents are diluting operator attention."
+      word: getCurrentLanguage() === "en" ? "STABLE" : "稳定",
+      description: getCurrentLanguage() === "en"
+        ? "All " + total + " nodes are within expected thresholds. No active incidents are diluting operator attention."
+        : "全部 " + total + " 个节点都在预期阈值内，目前没有活跃事件分散注意力。"
     };
   }
 
@@ -2862,31 +3212,35 @@
   function formatUptimeCompact(value) {
     const seconds = Number(value);
     if (!Number.isFinite(seconds) || seconds <= 0) {
-      return "0H";
+      return getCurrentLanguage() === "en" ? "0h" : "0小时";
     }
     const hours = Math.floor(seconds / 3600);
     if (hours < 24) {
-      return hours + "H";
+      return getCurrentLanguage() === "en" ? hours + "h" : hours + "小时";
     }
     const days = Math.floor(hours / 24);
-    return days + "D";
+    return getCurrentLanguage() === "en" ? days + "d" : days + "天";
   }
 
   function formatUptimeLong(value) {
     const seconds = Number(value);
     if (!Number.isFinite(seconds) || seconds <= 0) {
-      return "0m";
+      return getCurrentLanguage() === "en" ? "0m" : "0分";
     }
     const days = Math.floor(seconds / 86400);
     const hours = Math.floor((seconds % 86400) / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
     if (days > 0) {
-      return days + "d " + hours + "h " + minutes + "m";
+      return getCurrentLanguage() === "en"
+        ? days + "d " + hours + "h " + minutes + "m"
+        : days + "天 " + hours + "小时 " + minutes + "分";
     }
     if (hours > 0) {
-      return hours + "h " + minutes + "m";
+      return getCurrentLanguage() === "en"
+        ? hours + "h " + minutes + "m"
+        : hours + "小时 " + minutes + "分";
     }
-    return minutes + "m";
+    return getCurrentLanguage() === "en" ? minutes + "m" : minutes + "分";
   }
 
   function durationBetween(from, to) {
@@ -2898,11 +3252,13 @@
     const diff = Math.max(0, end.getTime() - start.getTime());
     const minutes = Math.round(diff / 60000);
     if (minutes < 60) {
-      return minutes + "m";
+      return getCurrentLanguage() === "en" ? minutes + "m" : minutes + "分";
     }
     const hours = Math.floor(minutes / 60);
     const restMinutes = minutes % 60;
-    return hours + "h " + restMinutes + "m";
+    return getCurrentLanguage() === "en"
+      ? hours + "h " + restMinutes + "m"
+      : hours + "小时 " + restMinutes + "分";
   }
 
   function sidebarContextLabel(page) {
@@ -2926,11 +3282,11 @@
   function featuredIncidentLabel(tone) {
     switch (tone) {
       case "critical":
-        return "Critical Incident";
+        return getCurrentLanguage() === "en" ? "Critical Incident" : "严重事件";
       case "degraded":
-        return "Degraded Incident";
+        return getCurrentLanguage() === "en" ? "Degraded Incident" : "降级事件";
       default:
-        return "Active Incident";
+        return getCurrentLanguage() === "en" ? "Active Incident" : "活跃事件";
     }
   }
 
@@ -3050,6 +3406,8 @@
       name: fieldValue(form, "name"),
       type: fieldValue(form, "type") || "systemd",
       enabled: fieldChecked(form, "enabled"),
+      scope_mode: fieldValue(form, "scope_mode") || "all",
+      node_ids: fieldValues(form, "node_ids"),
       service_name: fieldValue(form, "service_name"),
       container_name: fieldValue(form, "container_name"),
       scheme: fieldValue(form, "scheme"),
@@ -3145,6 +3503,8 @@
     setFieldValue(form, "name", check.name || "");
     setFieldValue(form, "type", check.type || "systemd");
     setFieldChecked(form, "enabled", check.enabled !== false);
+    setFieldValue(form, "scope_mode", check.scope_mode || "all");
+    setFieldValues(form, "node_ids", check.node_ids || []);
     setFieldValue(form, "service_name", check.service_name || "");
     setFieldValue(form, "container_name", check.container_name || "");
     setFieldValue(form, "scheme", check.scheme || "http");
@@ -3183,7 +3543,9 @@
     form.reset();
     setFieldValue(form, "id", "");
     setFieldValue(form, "type", "systemd");
+    setFieldValue(form, "scope_mode", "all");
     setFieldChecked(form, "enabled", true);
+    setFieldValues(form, "node_ids", []);
     syncAdminCheckForm();
   }
 
@@ -3206,6 +3568,7 @@
       return;
     }
     const type = fieldValue(form, "type") || "systemd";
+    const scopeMode = fieldValue(form, "scope_mode") || "all";
     const visibleFields = {
       systemd: ["service_name"],
       docker: ["container_name"],
@@ -3214,7 +3577,10 @@
     }[type] || [];
 
     document.querySelectorAll(".admin-check-field").forEach((field) => {
-      const isVisible = visibleFields.includes(field.dataset.field || "");
+      const fieldName = field.dataset.field || "";
+      const isVisible = fieldName === "node_ids"
+        ? scopeMode !== "all"
+        : visibleFields.includes(fieldName);
       field.hidden = !isVisible;
     });
   }
@@ -3238,6 +3604,15 @@
     return Boolean(field && field.checked);
   }
 
+  function fieldValues(form, name) {
+    if (!form) {
+      return [];
+    }
+    return Array.from(form.querySelectorAll('[name="' + name + '"]'))
+      .filter((field) => field.checked)
+      .map((field) => field.value || "");
+  }
+
   function setFieldValue(form, name, value) {
     const field = formField(form, name);
     if (field && "value" in field) {
@@ -3252,10 +3627,17 @@
     }
   }
 
+  function setFieldValues(form, name, values) {
+    const selected = new Set(Array.isArray(values) ? values.map((value) => String(value || "")) : []);
+    Array.from(form ? form.querySelectorAll('[name="' + name + '"]') : []).forEach((field) => {
+      field.checked = selected.has(String(field.value || ""));
+    });
+  }
+
   async function submitTestAlert(form) {
     const result = document.getElementById("test-alert-result");
     if (result) {
-      result.innerHTML = "<p>正在发送测试告警...</p>";
+      result.innerHTML = localizeMarkup("<p>正在发送测试告警...</p>");
     }
 
     const payload = {
@@ -3283,7 +3665,7 @@
     }
 
     const items = Array.isArray(data.results) ? data.results : [];
-    result.innerHTML = `
+    result.innerHTML = localizeMarkup(`
       <p>发送时间 ${escapeHTML(formatDateTime(data.sent_at))}</p>
       ${items
         .map(
@@ -3295,7 +3677,7 @@
           `
         )
         .join("")}
-    `;
+    `);
   }
 
   async function fetchJSON(url) {
@@ -3338,6 +3720,12 @@
     });
   }
 
+  function syncLanguageSelect() {
+    document.querySelectorAll("[data-language-select]").forEach((select) => {
+      select.value = getCurrentLanguage();
+    });
+  }
+
   function applyTheme(theme) {
     const nextTheme = THEMES.some((item) => item.id === theme) ? theme : "graphite";
     document.documentElement.dataset.theme = nextTheme;
@@ -3367,6 +3755,26 @@
     return (Array.isArray(services) ? services : []).filter((service) => normalizeStatus(service.status) !== "healthy").length;
   }
 
+  function formatStableNodesSummary(count) {
+    return getCurrentLanguage() === "en" ? count + " nodes stable" : count + " 个节点处于稳定状态";
+  }
+
+  function formatServiceIssueSummary(count) {
+    return getCurrentLanguage() === "en" ? count + " services are degraded or failing." : count + " 项服务处于异常或不稳定状态。";
+  }
+
+  function formatProbeObservationSummary(count) {
+    return getCurrentLanguage() === "en"
+      ? "Using the latest " + count + " observations to see where the path starts to degrade."
+      : "最近 " + count + " 条观测，直接用来判断从哪一层开始失真。";
+  }
+
+  function formatFleetSummary(nodeCount, healthyCount, activeIncidents) {
+    return getCurrentLanguage() === "en"
+      ? nodeCount + " nodes · " + healthyCount + " stable · " + activeIncidents + " active incidents"
+      : nodeCount + " 个节点 · " + healthyCount + " 稳定 · " + activeIncidents + " 个活跃事件";
+  }
+
   function normalizeStatus(status) {
     const value = String(status || "").trim().toLowerCase();
     if (["healthy", "running", "active", "ok", "up", "synced"].includes(value)) {
@@ -3384,13 +3792,13 @@
   function statusLabel(status) {
     switch (normalizeStatus(status)) {
       case "healthy":
-        return "稳定";
+        return getCurrentLanguage() === "en" ? "Healthy" : "稳定";
       case "degraded":
-        return "降级";
+        return getCurrentLanguage() === "en" ? "Degraded" : "降级";
       case "critical":
-        return "严重";
+        return getCurrentLanguage() === "en" ? "Critical" : "严重";
       default:
-        return "未知";
+        return getCurrentLanguage() === "en" ? "Unknown" : "未知";
     }
   }
 
@@ -3414,31 +3822,37 @@
 
   function formatDateTime(value) {
     if (!value) {
-      return "从未";
+      return getCurrentLanguage() === "en" ? "Never" : "从未";
     }
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) {
-      return "从未";
+      return getCurrentLanguage() === "en" ? "Never" : "从未";
     }
-    return date.toLocaleString("zh-CN", { hour12: false });
+    return date.toLocaleString(getCurrentLanguage() === "en" ? "en-US" : "zh-CN", { hour12: false });
   }
 
   function timeAgo(value) {
     if (!value) {
-      return "无信号";
+      return getCurrentLanguage() === "en" ? "No signal" : "无信号";
     }
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) {
-      return "无信号";
+      return getCurrentLanguage() === "en" ? "No signal" : "无信号";
     }
     let diff = Math.abs(Date.now() - date.getTime());
     if (diff < 60000) {
-      return Math.max(1, Math.round(diff / 1000)) + " 秒前";
+      return getCurrentLanguage() === "en"
+        ? Math.max(1, Math.round(diff / 1000)) + "s ago"
+        : Math.max(1, Math.round(diff / 1000)) + " 秒前";
     }
     if (diff < 3600000) {
-      return Math.max(1, Math.round(diff / 60000)) + " 分钟前";
+      return getCurrentLanguage() === "en"
+        ? Math.max(1, Math.round(diff / 60000)) + "m ago"
+        : Math.max(1, Math.round(diff / 60000)) + " 分钟前";
     }
-    return Math.max(1, Math.round(diff / 3600000)) + " 小时前";
+    return getCurrentLanguage() === "en"
+      ? Math.max(1, Math.round(diff / 3600000)) + "h ago"
+      : Math.max(1, Math.round(diff / 3600000)) + " 小时前";
   }
 
   function truncate(value, limit) {
