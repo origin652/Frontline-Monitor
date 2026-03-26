@@ -115,6 +115,12 @@ func (c *Collector) collect(ctx context.Context) (model.NodeHeartbeat, error) {
 		}
 	}
 
+	cpuModel := ""
+	cpuCores := runtime.NumCPU()
+	if infos, err := cpu.InfoWithContext(ctx); err == nil && len(infos) > 0 {
+		cpuModel = strings.TrimSpace(infos[0].ModelName)
+	}
+
 	return model.NodeHeartbeat{
 		NodeID:          c.cfg.Cluster.NodeID,
 		CollectedAt:     time.Now().UTC(),
@@ -126,6 +132,12 @@ func (c *Collector) collect(ctx context.Context) (model.NodeHeartbeat, error) {
 		Services:        services,
 		DockerChecks:    dockerChecks,
 		LocalHTTPChecks: httpChecks,
+		CPUModel:        cpuModel,
+		CPUCores:        cpuCores,
+		MemTotalMB:      vm.Total / (1024 * 1024),
+		DiskTotalMB:     usage.Total / (1024 * 1024),
+		OS:              hostInfo.Platform + " " + hostInfo.PlatformVersion,
+		Kernel:          hostInfo.KernelVersion,
 	}, nil
 }
 

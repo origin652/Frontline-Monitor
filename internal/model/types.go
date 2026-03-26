@@ -58,6 +58,12 @@ type NodeHeartbeat struct {
 	Services        []ServiceCheck    `json:"services"`
 	DockerChecks    []DockerCheck     `json:"docker_checks"`
 	LocalHTTPChecks []HTTPCheckResult `json:"local_http_checks"`
+	CPUModel        string            `json:"cpu_model,omitempty"`
+	CPUCores        int               `json:"cpu_cores,omitempty"`
+	MemTotalMB      uint64            `json:"mem_total_mb,omitempty"`
+	DiskTotalMB     uint64            `json:"disk_total_mb,omitempty"`
+	OS              string            `json:"os,omitempty"`
+	Kernel          string            `json:"kernel,omitempty"`
 }
 
 type ProbeObservation struct {

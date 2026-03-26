@@ -182,6 +182,20 @@ func (s *Store) init(ctx context.Context) error {
 			return fmt.Errorf("init sqlite schema: %w", err)
 		}
 	}
+
+	// Migration: add hardware spec columns to metric_samples
+	migrations := []string{
+		`ALTER TABLE metric_samples ADD COLUMN cpu_model TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE metric_samples ADD COLUMN cpu_cores INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE metric_samples ADD COLUMN mem_total_mb INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE metric_samples ADD COLUMN disk_total_mb INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE metric_samples ADD COLUMN os TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE metric_samples ADD COLUMN kernel TEXT NOT NULL DEFAULT ''`,
+	}
+	for _, stmt := range migrations {
+		_, _ = s.db.ExecContext(ctx, stmt) // ignore "duplicate column" errors
+	}
+
 	return nil
 }
 
@@ -201,9 +215,11 @@ func (s *Store) RecordHeartbeat(ctx context.Context, hb model.NodeHeartbeat) err
 
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO metric_samples (
-			node_id, collected_at, cpu_pct, mem_pct, disk_pct, load1, uptime_s, services_json, docker_json, http_json
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			node_id, collected_at, cpu_pct, mem_pct, disk_pct, load1, uptime_s, services_json, docker_json, http_json,
+			cpu_model, cpu_cores, mem_total_mb, disk_total_mb, os, kernel
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		hb.NodeID, hb.CollectedAt.Format(timeLayout), hb.CPUPct, hb.MemPct, hb.DiskPct, hb.Load1, hb.UptimeS, servicesJSON, dockerJSON, httpJSON,
+		hb.CPUModel, hb.CPUCores, hb.MemTotalMB, hb.DiskTotalMB, hb.OS, hb.Kernel,
 	)
 	return err
 }
@@ -303,7 +319,8 @@ func (s *Store) ListNodeStates(ctx context.Context) ([]model.NodeState, error) {
 
 func (s *Store) LatestHeartbeat(ctx context.Context, nodeID string) (*model.NodeHeartbeat, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT node_id, collected_at, cpu_pct, mem_pct, disk_pct, load1, uptime_s, services_json, docker_json, http_json
+		SELECT node_id, collected_at, cpu_pct, mem_pct, disk_pct, load1, uptime_s, services_json, docker_json, http_json,
+			cpu_model, cpu_cores, mem_total_mb, disk_total_mb, os, kernel
 		FROM metric_samples
 		WHERE node_id = ?
 		ORDER BY collected_at DESC
@@ -702,9 +719,11 @@ func (s *Store) Restore(ctx context.Context, snap SnapshotData) error {
 		httpJSON, _ := marshalJSON(hb.LocalHTTPChecks)
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO metric_samples (
-				node_id, collected_at, cpu_pct, mem_pct, disk_pct, load1, uptime_s, services_json, docker_json, http_json
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				node_id, collected_at, cpu_pct, mem_pct, disk_pct, load1, uptime_s, services_json, docker_json, http_json,
+				cpu_model, cpu_cores, mem_total_mb, disk_total_mb, os, kernel
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			hb.NodeID, hb.CollectedAt.Format(timeLayout), hb.CPUPct, hb.MemPct, hb.DiskPct, hb.Load1, hb.UptimeS, servicesJSON, dockerJSON, httpJSON,
+			hb.CPUModel, hb.CPUCores, hb.MemTotalMB, hb.DiskTotalMB, hb.OS, hb.Kernel,
 		); err != nil {
 			return err
 		}
@@ -940,7 +959,8 @@ func (s *Store) listAlertDeliveries(ctx context.Context) ([]model.AlertDelivery,
 
 func (s *Store) snapshotHeartbeats(ctx context.Context) ([]model.NodeHeartbeat, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT node_id, collected_at, cpu_pct, mem_pct, disk_pct, load1, uptime_s, services_json, docker_json, http_json
+		SELECT node_id, collected_at, cpu_pct, mem_pct, disk_pct, load1, uptime_s, services_json, docker_json, http_json,
+			cpu_model, cpu_cores, mem_total_mb, disk_total_mb, os, kernel
 		FROM metric_samples ORDER BY collected_at DESC LIMIT 300`)
 	if err != nil {
 		return nil, err
@@ -997,7 +1017,8 @@ func scanNodeState(scanner interface{ Scan(dest ...any) error }) (*model.NodeSta
 func scanHeartbeat(scanner interface{ Scan(dest ...any) error }) (*model.NodeHeartbeat, error) {
 	var hb model.NodeHeartbeat
 	var collectedAt, servicesJSON, dockerJSON, httpJSON string
-	if err := scanner.Scan(&hb.NodeID, &collectedAt, &hb.CPUPct, &hb.MemPct, &hb.DiskPct, &hb.Load1, &hb.UptimeS, &servicesJSON, &dockerJSON, &httpJSON); err != nil {
+	if err := scanner.Scan(&hb.NodeID, &collectedAt, &hb.CPUPct, &hb.MemPct, &hb.DiskPct, &hb.Load1, &hb.UptimeS, &servicesJSON, &dockerJSON, &httpJSON,
+		&hb.CPUModel, &hb.CPUCores, &hb.MemTotalMB, &hb.DiskTotalMB, &hb.OS, &hb.Kernel); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}

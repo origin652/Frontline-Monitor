@@ -100,7 +100,15 @@
       "invalid password": "密码错误",
       "current password is invalid": "当前密码错误",
       "admin login required": "需要管理员登录",
-      "Language": "语言"
+      "Language": "语言",
+      "Hardware Profile": "硬件配置",
+      "Machine Specifications": "机器规格",
+      "CPU": "CPU",
+      "Cores": "核心数",
+      "Memory": "内存",
+      "Disk": "磁盘",
+      "OS": "操作系统",
+      "Kernel": "内核"
     },
     en: {
       "总览": "Overview",
@@ -266,6 +274,36 @@
   applyTheme(document.documentElement.dataset.theme || document.body.dataset.defaultTheme || "graphite");
   applyLanguage(getStoredLanguage());
   renderRoute();
+
+  // Sparkline tooltip
+  const sparklineTooltip = document.createElement("div");
+  sparklineTooltip.className = "sparkline-tooltip";
+  document.body.appendChild(sparklineTooltip);
+
+  document.addEventListener("mousemove", function (event) {
+    const svg = event.target.closest("svg");
+    if (!svg || !svg.closest(".obs-chart-panel__chart, .obs-aside__spark, .metric-bar__chart")) {
+      sparklineTooltip.classList.remove("is-visible");
+      return;
+    }
+    const rect = svg.getBoundingClientRect();
+    const xRatio = (event.clientX - rect.left) / rect.width;
+    const path = svg.querySelector("g > path:last-child");
+    if (!path) return;
+    const pathLen = path.getTotalLength();
+    const point = path.getPointAtLength(xRatio * pathLen);
+    const maxY = 34;
+    const minY = 8;
+    const pct = Math.max(0, Math.min(100, ((maxY - point.y) / (maxY - minY)) * 100));
+    sparklineTooltip.textContent = pct.toFixed(1) + "%";
+    sparklineTooltip.style.left = (event.clientX + 10) + "px";
+    sparklineTooltip.style.top = (event.clientY - 28) + "px";
+    sparklineTooltip.classList.add("is-visible");
+  });
+
+  document.addEventListener("mouseleave", function () {
+    sparklineTooltip.classList.remove("is-visible");
+  }, true);
 
   function handleDocumentClick(event) {
     const searchRoot = event.target.closest("[data-search-root]");
@@ -2656,6 +2694,8 @@
           </article>
         </section>
 
+        ${renderHardwareSpecs(detail.heartbeat)}
+
         <section class="obs-split">
           <article class="obs-section">
             <div class="obs-section__head">
@@ -3271,6 +3311,30 @@
     }
 
     return `<div class="obs-log-stream">${lines.join("")}</div>`;
+  }
+
+  function renderHardwareSpecs(heartbeat) {
+    if (!heartbeat || (!heartbeat.cpu_model && !heartbeat.cpu_cores)) return "";
+    const memGB = heartbeat.mem_total_mb ? (heartbeat.mem_total_mb / 1024).toFixed(1) : "-";
+    const diskGB = heartbeat.disk_total_mb ? (heartbeat.disk_total_mb / 1024).toFixed(1) : "-";
+    return `
+      <section class="obs-section obs-hw-specs">
+        <div class="obs-section__head">
+          <div>
+            <p class="obs-section__eyebrow">Hardware Profile</p>
+            <h2>Machine Specifications</h2>
+          </div>
+        </div>
+        <div class="obs-info-grid obs-info-grid--3col">
+          ${renderObsidianInfoCard("CPU", escapeHTML(heartbeat.cpu_model || "-"))}
+          ${renderObsidianInfoCard("Cores", String(heartbeat.cpu_cores || "-"))}
+          ${renderObsidianInfoCard("Memory", memGB + " GB")}
+          ${renderObsidianInfoCard("Disk", diskGB + " GB")}
+          ${renderObsidianInfoCard("OS", escapeHTML(heartbeat.os || "-"))}
+          ${renderObsidianInfoCard("Kernel", escapeHTML(heartbeat.kernel || "-"))}
+        </div>
+      </section>
+    `;
   }
 
   function renderObsidianInfoCard(label, value) {
