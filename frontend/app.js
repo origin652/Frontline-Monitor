@@ -66,6 +66,7 @@
       "Timeout": "超时",
       "Label": "标签",
       "Enabled": "启用",
+      "Join the next collection cycle immediately": "保存后下一轮立即生效",
       "Node": "节点",
       "Node ": "节点 ",
       "Display Name": "显示名称",
@@ -242,10 +243,14 @@
   let currentSearchItems = [];
   let currentSearchQuery = "";
   let searchPanelOpen = false;
+  let openControlMenu = "";
+  let openAdminSelectMenuID = "";
   let sidebarDrawerOpen = false;
   let activeMeta = {};
   let currentAdminChecks = [];
   let currentAdminNodes = [];
+  let activeAdminCheckID = "";
+  let activeAdminNodeID = "";
 
   document.addEventListener("click", handleDocumentClick);
   document.addEventListener("change", handleDocumentChange);
@@ -266,6 +271,44 @@
     const searchRoot = event.target.closest("[data-search-root]");
     if (!searchRoot) {
       closeSearchPanel();
+    }
+    if (!event.target.closest("[data-control-menu]")) {
+      closeControlMenu();
+    }
+    if (!event.target.closest("[data-admin-select]")) {
+      closeAdminSelectMenu();
+    }
+
+    const controlOption = event.target.closest("[data-control-option]");
+    if (controlOption) {
+      event.preventDefault();
+      handleControlOption(controlOption);
+      return;
+    }
+
+    const controlTrigger = event.target.closest("[data-control-trigger]");
+    if (controlTrigger) {
+      event.preventDefault();
+      closeSearchPanel();
+      toggleControlMenu(controlTrigger.dataset.controlTrigger || "");
+      return;
+    }
+
+    const adminSelectOption = event.target.closest("[data-admin-select-option]");
+    if (adminSelectOption) {
+      event.preventDefault();
+      handleAdminSelectOption(adminSelectOption);
+      return;
+    }
+
+    const adminSelectTrigger = event.target.closest("[data-admin-select-trigger]");
+    if (adminSelectTrigger) {
+      event.preventDefault();
+      closeSearchPanel();
+      closeControlMenu();
+      const root = adminSelectTrigger.closest("[data-admin-select]");
+      toggleAdminSelectMenu(root ? (root.dataset.adminSelectId || "") : "");
+      return;
     }
 
     const sidebarToggle = event.target.closest("[data-sidebar-toggle]");
@@ -318,15 +361,6 @@
   }
 
   function handleDocumentChange(event) {
-    if (event.target.matches("[data-theme-select]")) {
-      applyTheme(event.target.value);
-      return;
-    }
-    if (event.target.matches("[data-language-select]")) {
-      applyLanguage(event.target.value);
-      renderRoute();
-      return;
-    }
     if (event.target.matches("[data-check-type]") || event.target.matches("[data-check-scope]")) {
       syncAdminCheckForm();
     }
@@ -350,6 +384,18 @@
   }
 
   function handleDocumentKeydown(event) {
+    if (event.key === "Escape" && openAdminSelectMenuID) {
+      event.preventDefault();
+      closeAdminSelectMenu();
+      return;
+    }
+
+    if (event.key === "Escape" && openControlMenu) {
+      event.preventDefault();
+      closeControlMenu();
+      return;
+    }
+
     if (event.key === "Escape" && sidebarDrawerOpen) {
       event.preventDefault();
       toggleSidebarDrawer(false);
@@ -384,8 +430,143 @@
   }
 
   function handleWindowResize() {
+    if (openAdminSelectMenuID) {
+      closeAdminSelectMenu();
+    }
+    if (openControlMenu) {
+      closeControlMenu();
+    }
     if (window.innerWidth > 980 && sidebarDrawerOpen) {
       toggleSidebarDrawer(false);
+    }
+  }
+
+  function closeControlMenu() {
+    if (!openControlMenu) {
+      return;
+    }
+    openControlMenu = "";
+    syncControlMenus();
+  }
+
+  function toggleControlMenu(menuID) {
+    if (!menuID) {
+      closeControlMenu();
+      return;
+    }
+    openControlMenu = openControlMenu === menuID ? "" : menuID;
+    syncControlMenus();
+  }
+
+  function syncControlMenus() {
+    document.querySelectorAll("[data-control-menu]").forEach((menu) => {
+      const menuID = menu.dataset.controlMenu || "";
+      const isOpen = menuID === openControlMenu;
+      menu.classList.toggle("is-open", isOpen);
+      const trigger = menu.querySelector("[data-control-trigger]");
+      if (trigger) {
+        trigger.setAttribute("aria-expanded", isOpen ? "true" : "false");
+      }
+      const panel = menu.querySelector(".obs-theme-switcher__panel");
+      if (panel) {
+        panel.setAttribute("aria-hidden", isOpen ? "false" : "true");
+      }
+    });
+  }
+
+  function closeAdminSelectMenu() {
+    if (!openAdminSelectMenuID) {
+      return;
+    }
+    openAdminSelectMenuID = "";
+    syncAdminSelectMenus();
+  }
+
+  function toggleAdminSelectMenu(menuID) {
+    if (!menuID) {
+      closeAdminSelectMenu();
+      return;
+    }
+    openAdminSelectMenuID = openAdminSelectMenuID === menuID ? "" : menuID;
+    syncAdminSelectMenus();
+  }
+
+  function syncAdminSelectMenus() {
+    document.querySelectorAll("[data-admin-select]").forEach((root) => {
+      const menuID = root.dataset.adminSelectId || "";
+      const isOpen = menuID !== "" && menuID === openAdminSelectMenuID;
+      root.classList.toggle("is-open", isOpen);
+
+      const trigger = root.querySelector("[data-admin-select-trigger]");
+      if (trigger) {
+        trigger.setAttribute("aria-expanded", isOpen ? "true" : "false");
+      }
+      const panel = root.querySelector(".admin-select__panel");
+      if (panel) {
+        panel.setAttribute("aria-hidden", isOpen ? "false" : "true");
+      }
+
+      const input = root.querySelector('input[type="hidden"][name]');
+      const value = input && "value" in input ? String(input.value || "") : "";
+      let selectedLabel = "";
+
+      root.querySelectorAll("[data-admin-select-option]").forEach((button) => {
+        const active = (button.dataset.adminSelectValue || "") === value;
+        button.classList.toggle("is-active", active);
+        button.setAttribute("aria-checked", active ? "true" : "false");
+        const check = button.querySelector(".admin-select__check");
+        if (check) {
+          check.hidden = !active;
+        }
+        if (active) {
+          const labelNode = button.querySelector(".admin-select__label");
+          selectedLabel = labelNode ? (labelNode.textContent || "") : "";
+        }
+      });
+
+      const current = root.querySelector("[data-admin-select-current]");
+      if (current) {
+        current.textContent = selectedLabel;
+      }
+    });
+  }
+
+  function handleAdminSelectOption(button) {
+    const root = button.closest("[data-admin-select]");
+    if (!root) {
+      return;
+    }
+    const value = button.dataset.adminSelectValue || "";
+    const input = root.querySelector('input[type="hidden"][name]');
+    if (!input) {
+      return;
+    }
+    const previous = String(input.value || "");
+    if (previous !== value) {
+      input.value = value;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    openAdminSelectMenuID = "";
+    syncAdminSelectMenus();
+  }
+
+  function handleControlOption(button) {
+    const kind = button.dataset.controlKind || "";
+    const value = button.dataset.controlValue || "";
+    if (!kind || !value) {
+      return;
+    }
+    if (kind === "theme") {
+      applyTheme(value);
+      syncThemeSelect();
+      closeControlMenu();
+      return;
+    }
+    if (kind === "language") {
+      applyLanguage(value);
+      openControlMenu = "";
+      renderRoute();
     }
   }
 
@@ -557,8 +738,11 @@
         generatedAt: new Date().toISOString(),
         content: renderStatePanel("加载中", "正在从 API 拉取最新集群状态。", route)
       }));
+      openControlMenu = "";
+      openAdminSelectMenuID = "";
       syncThemeSelect();
       syncLanguageSelect();
+      syncControlMenus();
       syncSidebarDrawer();
     }
 
@@ -576,11 +760,16 @@
       }
       app.innerHTML = localizeMarkup(renderShell(view));
       lastRouteKey = routeKey;
+      openControlMenu = "";
+      openAdminSelectMenuID = "";
       syncThemeSelect();
       syncLanguageSelect();
+      syncControlMenus();
       syncSearchUI();
       bindPageFormHandlers();
       syncAdminCheckForm();
+      syncAdminSelectMenus();
+      syncAdminRowSelection();
       syncSidebarDrawer();
       scheduleRefresh();
     } catch (error) {
@@ -607,9 +796,12 @@
         content: renderStatePanel("加载失败", error.message || "接口请求失败。", route)
       }));
       lastRouteKey = routeKey;
+      openControlMenu = "";
+      openAdminSelectMenuID = "";
       bindPageFormHandlers();
       syncThemeSelect();
       syncLanguageSelect();
+      syncControlMenus();
       syncSearchUI();
       syncSidebarDrawer();
       scheduleRefresh();
@@ -690,12 +882,115 @@
     return document.documentElement.dataset.language || "zh";
   }
 
-  function renderLanguageOptions() {
-    const selectedLanguage = getCurrentLanguage();
-    return LANGUAGES.map((language) => {
-      const selected = language.id === selectedLanguage ? " selected" : "";
-      return `<option value="${language.id}"${selected}>${language.label}</option>`;
-    }).join("");
+  function controlOptions(kind) {
+    return kind === "theme" ? THEMES : LANGUAGES;
+  }
+
+  function currentControlOption(kind) {
+    const currentValue = kind === "theme" ? getCurrentTheme() : getCurrentLanguage();
+    return controlOptions(kind).find((option) => option.id === currentValue) || controlOptions(kind)[0];
+  }
+
+  function renderControlMenu(kind, surface, iconName, label) {
+    const current = currentControlOption(kind);
+    const menuID = kind + "-" + surface;
+    const isOpen = openControlMenu === menuID;
+    const options = controlOptions(kind);
+    return `
+      <div class="obs-theme-switcher${surface === "drawer" ? " obs-theme-switcher--drawer" : ""}${isOpen ? " is-open" : ""}" data-control-menu="${menuID}">
+        <button
+          type="button"
+          class="obs-theme-switcher__trigger"
+          data-control-trigger="${menuID}"
+          aria-haspopup="menu"
+          aria-expanded="${isOpen ? "true" : "false"}"
+          aria-label="${escapeHTML(label)}"
+        >
+          ${renderIcon(iconName)}
+          <span class="obs-theme-switcher__value" data-control-current="${kind}">${escapeHTML(current.label)}</span>
+          <span class="obs-theme-switcher__chevron">${renderIcon("expand_more")}</span>
+        </button>
+        <div class="obs-theme-switcher__panel" role="menu" aria-label="${escapeHTML(label)}" aria-hidden="${isOpen ? "false" : "true"}">
+          ${options
+            .map((option) => {
+              const active = option.id === current.id;
+              return `
+                <button
+                  type="button"
+                  class="obs-theme-switcher__option${active ? " is-active" : ""}"
+                  role="menuitemradio"
+                  aria-checked="${active ? "true" : "false"}"
+                  data-control-option
+                  data-control-kind="${kind}"
+                  data-control-value="${option.id}"
+                >
+                  <span>${escapeHTML(option.label)}</span>
+                  <span class="obs-theme-switcher__check"${active ? "" : " hidden"}>${renderIcon("check")}</span>
+                </button>
+              `;
+            })
+            .join("")}
+        </div>
+      </div>
+    `;
+  }
+
+  function renderAdminSelect(name, options, initialValue, inputAttributes, label) {
+    const list = Array.isArray(options)
+      ? options
+        .map((item) => Array.isArray(item) ? item : [item && item.value, item && item.label])
+        .filter((item) => item && item.length >= 2 && item[0] !== undefined && item[0] !== null)
+        .map((item) => [String(item[0]), String(item[1])])
+      : [];
+
+    let value = String(initialValue == null ? "" : initialValue);
+    if (!list.some((item) => item[0] === value)) {
+      value = list.length > 0 ? list[0][0] : "";
+    }
+
+    const selected = list.find((item) => item[0] === value);
+    const selectedLabel = selected ? selected[1] : "";
+    const defaultValue = list.length > 0 ? list[0][0] : "";
+    const menuID = "admin-select-" + String(name || "");
+    const isOpen = menuID === openAdminSelectMenuID;
+    const extraAttributes = inputAttributes ? " " + inputAttributes : "";
+
+    return `
+      <div class="admin-select${isOpen ? " is-open" : ""}" data-admin-select data-admin-select-id="${escapeHTML(menuID)}">
+        <input type="hidden" name="${escapeHTML(name || "")}" value="${escapeHTML(value)}" data-default-value="${escapeHTML(defaultValue)}"${extraAttributes}>
+        <button
+          type="button"
+          class="admin-select__trigger"
+          data-admin-select-trigger
+          aria-haspopup="menu"
+          aria-expanded="${isOpen ? "true" : "false"}"
+          aria-label="${escapeHTML(label || String(name || ""))}"
+        >
+          <span class="admin-select__value" data-admin-select-current>${escapeHTML(selectedLabel)}</span>
+          <span class="admin-select__chevron">${renderIcon("expand_more")}</span>
+        </button>
+        <div class="admin-select__panel" role="menu" aria-label="${escapeHTML(label || String(name || ""))}" aria-hidden="${isOpen ? "false" : "true"}">
+          ${list
+            .map((item) => {
+              const active = item[0] === value;
+              return `
+                <button
+                  type="button"
+                  class="admin-select__option${active ? " is-active" : ""}"
+                  role="menuitemradio"
+                  aria-checked="${active ? "true" : "false"}"
+                  data-admin-select-option
+                  data-admin-select-value="${escapeHTML(item[0])}"
+                >
+                  <span class="admin-select__label">${escapeHTML(item[1])}</span>
+                  <span class="admin-select__check"${active ? "" : " hidden"}>${renderIcon("check")}</span>
+                </button>
+              `;
+            })
+            .join("")}
+        </div>
+      </div>
+    `;
   }
 
   function localizeText(text) {
@@ -923,14 +1218,6 @@
         events: []
       })
     };
-  }
-
-  function renderThemeOptions() {
-    const selectedTheme = getCurrentTheme();
-    return THEMES.map((theme) => {
-      const selected = theme.id === selectedTheme ? " selected" : "";
-      return `<option value="${theme.id}"${selected}>${theme.label}</option>`;
-    }).join("");
   }
 
   function renderStatePanel(title, description, route) {
@@ -1327,20 +1614,32 @@
               </label>
               <label>
                 <span>Type</span>
-                <select name="type" data-check-type>
-                  <option value="systemd">systemd</option>
-                  <option value="docker">docker</option>
-                  <option value="http">http</option>
-                  <option value="tcp">tcp</option>
-                </select>
+                ${renderAdminSelect(
+                  "type",
+                  [
+                    ["systemd", "systemd"],
+                    ["docker", "docker"],
+                    ["http", "http"],
+                    ["tcp", "tcp"]
+                  ],
+                  "systemd",
+                  "data-check-type",
+                  "Type"
+                )}
               </label>
               <label>
                 <span>Node Scope</span>
-                <select name="scope_mode" data-check-scope>
-                  <option value="all">All nodes</option>
-                  <option value="include_nodes">Only selected nodes</option>
-                  <option value="exclude_nodes">All except selected nodes</option>
-                </select>
+                ${renderAdminSelect(
+                  "scope_mode",
+                  [
+                    ["all", "All nodes"],
+                    ["include_nodes", "Only selected nodes"],
+                    ["exclude_nodes", "All except selected nodes"]
+                  ],
+                  "all",
+                  "data-check-scope",
+                  "Node Scope"
+                )}
               </label>
               <label class="admin-check-field" data-field="service_name">
                 <span>Service Name</span>
@@ -1352,17 +1651,29 @@
               </label>
               <label class="admin-check-field" data-field="scheme">
                 <span>Scheme</span>
-                <select name="scheme">
-                  <option value="http">http</option>
-                  <option value="https">https</option>
-                </select>
+                ${renderAdminSelect(
+                  "scheme",
+                  [
+                    ["http", "http"],
+                    ["https", "https"]
+                  ],
+                  "http",
+                  "",
+                  "Scheme"
+                )}
               </label>
               <label class="admin-check-field" data-field="host_mode">
                 <span>Host Mode</span>
-                <select name="host_mode">
-                  <option value="peer">peer</option>
-                  <option value="local">local</option>
-                </select>
+                ${renderAdminSelect(
+                  "host_mode",
+                  [
+                    ["peer", "peer"],
+                    ["local", "local"]
+                  ],
+                  "peer",
+                  "",
+                  "Host Mode"
+                )}
               </label>
               <label class="admin-check-field" data-field="port">
                 <span>Port</span>
@@ -1390,14 +1701,19 @@
                   ${nodeList.map((node) => `
                     <label class="admin-node-scope-item">
                       <input type="checkbox" name="node_ids" value="${escapeHTML(node.node_id || "")}">
-                      <span>${escapeHTML(formatAdminNodeOption(node))}</span>
+                      <span class="admin-node-scope-item__box" aria-hidden="true"></span>
+                      <span class="admin-node-scope-item__label">${escapeHTML(formatAdminNodeOption(node))}</span>
                     </label>
                   `).join("")}
                 </div>
               </fieldset>
               <label class="admin-toggle">
                 <input type="checkbox" name="enabled" checked>
-                <span>Enabled</span>
+                <span class="admin-toggle__box" aria-hidden="true"></span>
+                <span class="admin-toggle__text">
+                  <strong>Enabled</strong>
+                  <small>Join the next collection cycle immediately</small>
+                </span>
               </label>
               <div class="admin-form__actions">
                 <button type="submit" class="admin-button">保存检测项</button>
@@ -1434,9 +1750,13 @@
             <form id="admin-node-name-form" class="admin-form admin-form--grid">
               <label>
                 <span>Node</span>
-                <select name="node_id">
-                  ${nodeList.map((node) => `<option value="${escapeHTML(node.node_id || "")}">${escapeHTML(formatAdminNodeOption(node))}</option>`).join("")}
-                </select>
+                ${renderAdminSelect(
+                  "node_id",
+                  nodeList.map((node) => [node.node_id || "", formatAdminNodeOption(node)]),
+                  nodeList.length > 0 ? (nodeList[0].node_id || "") : "",
+                  "",
+                  "Node"
+                )}
               </label>
               <label>
                 <span>Display Name</span>
@@ -1470,7 +1790,7 @@
 
   function renderAdminCheckRow(check) {
     return `
-      <article class="service-row status-surface admin-check-row" data-status="${check.enabled ? "healthy" : "unknown"}">
+      <article class="service-row status-surface admin-check-row" data-status="${check.enabled ? "healthy" : "unknown"}" data-check-id="${escapeHTML(check.id || "")}">
         <div class="admin-check-row__head">
           <div>
             <strong>${escapeHTML(check.name || check.type || "check")}</strong>
@@ -1488,7 +1808,7 @@
 
   function renderAdminNodeNameRow(node) {
     return `
-      <article class="service-row status-surface admin-check-row" data-status="healthy">
+      <article class="service-row status-surface admin-check-row" data-status="healthy" data-node-id="${escapeHTML(node.node_id || "")}">
         <div class="admin-check-row__head">
           <div>
             <strong>${escapeHTML(node.effective_display_name || node.node_id || "-")}</strong>
@@ -1909,18 +2229,8 @@
               <span class="obs-sidebar__filing">${filingLink}</span>
             </div>
             <div class="obs-sidebar__mobile-tools">
-              <label class="obs-theme-switcher obs-theme-switcher--drawer">
-                ${renderIcon("translate")}
-                <select data-language-select aria-label="Language">
-                  ${renderLanguageOptions()}
-                </select>
-              </label>
-              <label class="obs-theme-switcher obs-theme-switcher--drawer">
-                ${renderIcon("palette")}
-                <select data-theme-select>
-                  ${renderThemeOptions()}
-                </select>
-              </label>
+              ${renderControlMenu("language", "drawer", "translate", "Language")}
+              ${renderControlMenu("theme", "drawer", "palette", "Theme")}
               <div class="obs-topbar__operator obs-topbar__operator--drawer">
                 <span>${escapeHTML(activeMeta.is_admin ? "Admin Session" : "Cluster Leader")}</span>
                 <strong>${escapeHTML(activeMeta.is_admin ? "Authorized" : (view.leaderName || view.leaderID || "Electing"))}</strong>
@@ -1958,18 +2268,8 @@
           </div>
           <div class="obs-topbar__actions">
             ${renderObsidianMeta("Updated", formatDateTime(view.generatedAt))}
-            <label class="obs-theme-switcher" for="language-select">
-              ${renderIcon("translate")}
-              <select id="language-select" data-language-select aria-label="Language">
-                ${renderLanguageOptions()}
-              </select>
-            </label>
-            <label class="obs-theme-switcher" for="theme-select">
-              ${renderIcon("palette")}
-              <select id="theme-select" data-theme-select>
-                ${renderThemeOptions()}
-              </select>
-            </label>
+            ${renderControlMenu("language", "topbar", "translate", "Language")}
+            ${renderControlMenu("theme", "topbar", "palette", "Theme")}
             <div class="obs-topbar__operator">
               <span>${escapeHTML(activeMeta.is_admin ? "Admin Session" : "Cluster Leader")}</span>
               <strong>${escapeHTML(activeMeta.is_admin ? "Authorized" : (view.leaderName || view.leaderID || "Electing"))}</strong>
@@ -3491,6 +3791,7 @@
         body: payload
       });
       setAdminCheckNotice("检测项已保存。", false);
+      activeAdminCheckID = "";
       resetAdminCheckForm();
       renderRoute();
     } catch (error) {
@@ -3513,6 +3814,7 @@
         }
       });
       setAdminNodeNotice("节点名称已保存。", false);
+      activeAdminNodeID = "";
       renderRoute();
     } catch (error) {
       setAdminNodeNotice(error.message || "保存节点名称失败", true);
@@ -3529,6 +3831,9 @@
         method: "DELETE"
       });
       setAdminCheckNotice("检测项已删除。", false);
+      if (activeAdminCheckID === String(id)) {
+        activeAdminCheckID = "";
+      }
       renderRoute();
     } catch (error) {
       setAdminCheckNotice(error.message || "删除检测项失败", true);
@@ -3545,6 +3850,9 @@
         method: "DELETE"
       });
       setAdminNodeNotice("已恢复默认名称。", false);
+      if (activeAdminNodeID === String(nodeID)) {
+        activeAdminNodeID = "";
+      }
       renderRoute();
     } catch (error) {
       setAdminNodeNotice(error.message || "恢复默认名称失败", true);
@@ -3576,7 +3884,10 @@
     setFieldValue(form, "expect_status", check.expect_status || "");
     setFieldValue(form, "timeout", check.timeout || "");
     setFieldValue(form, "label", check.label || "");
+    activeAdminCheckID = String(check.id || "");
+    activeAdminNodeID = "";
     syncAdminCheckForm();
+    syncAdminRowSelection();
     form.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
@@ -3592,6 +3903,10 @@
     }
     setFieldValue(form, "node_id", node.node_id || "");
     setFieldValue(form, "display_name", node.display_name || "");
+    activeAdminNodeID = String(node.node_id || "");
+    activeAdminCheckID = "";
+    syncAdminSelectMenus();
+    syncAdminRowSelection();
     form.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
@@ -3606,7 +3921,9 @@
     setFieldValue(form, "scope_mode", "all");
     setFieldChecked(form, "enabled", true);
     setFieldValues(form, "node_ids", []);
+    activeAdminCheckID = "";
     syncAdminCheckForm();
+    syncAdminRowSelection();
   }
 
   function resetAdminNodeNameForm() {
@@ -3615,11 +3932,14 @@
       return;
     }
     form.reset();
-    const select = formField(form, "node_id");
-    if (select && select.options && select.options.length > 0) {
-      select.selectedIndex = 0;
+    const nodeField = formField(form, "node_id");
+    if (nodeField && nodeField.dataset && nodeField.dataset.defaultValue !== undefined) {
+      nodeField.value = nodeField.dataset.defaultValue;
     }
     setFieldValue(form, "display_name", "");
+    activeAdminNodeID = "";
+    syncAdminSelectMenus();
+    syncAdminRowSelection();
   }
 
   function syncAdminCheckForm() {
@@ -3642,6 +3962,16 @@
         ? scopeMode !== "all"
         : visibleFields.includes(fieldName);
       field.hidden = !isVisible;
+    });
+    syncAdminSelectMenus();
+  }
+
+  function syncAdminRowSelection() {
+    document.querySelectorAll(".admin-check-row[data-check-id]").forEach((row) => {
+      row.classList.toggle("is-editing", activeAdminCheckID !== "" && row.dataset.checkId === activeAdminCheckID);
+    });
+    document.querySelectorAll(".admin-check-row[data-node-id]").forEach((row) => {
+      row.classList.toggle("is-editing", activeAdminNodeID !== "" && row.dataset.nodeId === activeAdminNodeID);
     });
   }
 
@@ -3775,14 +4105,34 @@
   }
 
   function syncThemeSelect() {
-    document.querySelectorAll("[data-theme-select]").forEach((select) => {
-      select.value = getCurrentTheme();
+    const current = currentControlOption("theme");
+    document.querySelectorAll('[data-control-current="theme"]').forEach((node) => {
+      node.textContent = current.label;
+    });
+    document.querySelectorAll('[data-control-option][data-control-kind="theme"]').forEach((button) => {
+      const active = (button.dataset.controlValue || "") === current.id;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-checked", active ? "true" : "false");
+      const check = button.querySelector(".obs-theme-switcher__check");
+      if (check) {
+        check.hidden = !active;
+      }
     });
   }
 
   function syncLanguageSelect() {
-    document.querySelectorAll("[data-language-select]").forEach((select) => {
-      select.value = getCurrentLanguage();
+    const current = currentControlOption("language");
+    document.querySelectorAll('[data-control-current="language"]').forEach((node) => {
+      node.textContent = current.label;
+    });
+    document.querySelectorAll('[data-control-option][data-control-kind="language"]').forEach((button) => {
+      const active = (button.dataset.controlValue || "") === current.id;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-checked", active ? "true" : "false");
+      const check = button.querySelector(".obs-theme-switcher__check");
+      if (check) {
+        check.hidden = !active;
+      }
     });
   }
 
