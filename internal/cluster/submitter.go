@@ -9,11 +9,13 @@ import (
 	"net/http"
 	"time"
 
+	"vps-monitor/internal/config"
 	"vps-monitor/internal/model"
 )
 
 type Submitter struct {
 	manager *Manager
+	cfg     *config.Config
 	client  *http.Client
 }
 
@@ -22,9 +24,10 @@ type applyCommandRequest struct {
 	Payload json.RawMessage `json:"payload"`
 }
 
-func NewSubmitter(manager *Manager) *Submitter {
+func NewSubmitter(manager *Manager, cfg *config.Config) *Submitter {
 	return &Submitter{
 		manager: manager,
+		cfg:     cfg,
 		client: &http.Client{
 			Timeout: 8 * time.Second,
 		},
@@ -62,6 +65,9 @@ func (s *Submitter) post(ctx context.Context, path string, payload any) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if token := s.cfg.InternalToken(); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 	resp, err := s.client.Do(req)
 	if err != nil {
 		return err

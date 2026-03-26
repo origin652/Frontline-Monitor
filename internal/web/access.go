@@ -1,6 +1,7 @@
 package web
 
 import (
+	"crypto/subtle"
 	"fmt"
 	"net"
 	"net/http"
@@ -10,6 +11,18 @@ import (
 )
 
 func (s *Server) requireInternalRequest(r *http.Request) error {
+	// When an internal token is configured, always require it.
+	// This is critical when running behind a reverse proxy (e.g. Nginx)
+	// where RemoteAddr is always 127.0.0.1.
+	if token := s.cfg.InternalToken(); token != "" {
+		auth := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if subtle.ConstantTimeCompare([]byte(auth), []byte(token)) != 1 {
+			return fmt.Errorf("invalid or missing internal token")
+		}
+		return nil
+	}
+
+	// Fallback: IP-based access control (only safe without reverse proxy)
 	host := remoteHost(r.RemoteAddr)
 	if host == "" {
 		return fmt.Errorf("unable to determine remote host")

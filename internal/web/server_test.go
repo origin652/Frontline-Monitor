@@ -70,7 +70,7 @@ func TestAdminBootstrapChecksAndRedaction(t *testing.T) {
 
 	waitForLeader(t, manager)
 
-	submitter := cluster.NewSubmitter(manager)
+	submitter := cluster.NewSubmitter(manager, cfg)
 	server, err := New(cfg, st, manager, submitter, nil, logger)
 	if err != nil {
 		t.Fatalf("new server: %v", err)

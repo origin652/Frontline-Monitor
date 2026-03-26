@@ -23,11 +23,12 @@ type Config struct {
 }
 
 type ClusterConfig struct {
-	NodeID       string        `yaml:"node_id"`
-	RaftAddr     string        `yaml:"raft_addr"`
-	RaftBindAddr string        `yaml:"raft_bind_addr"`
-	Peers        []ClusterPeer `yaml:"peers"`
-	Priority     int           `yaml:"priority"`
+	NodeID           string        `yaml:"node_id"`
+	RaftAddr         string        `yaml:"raft_addr"`
+	RaftBindAddr     string        `yaml:"raft_bind_addr"`
+	Peers            []ClusterPeer `yaml:"peers"`
+	Priority         int           `yaml:"priority"`
+	InternalTokenEnv string        `yaml:"internal_token_env"`
 }
 
 type ClusterPeer struct {
@@ -315,6 +316,14 @@ func parseDurationOr(raw string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return parsed
+}
+
+func (c *Config) InternalToken() string {
+	env := c.Cluster.InternalTokenEnv
+	if env == "" {
+		env = "MONITOR_INTERNAL_TOKEN"
+	}
+	return os.Getenv(env)
 }
 
 func (p ClusterPeer) DisplayNameOrNodeID() string {

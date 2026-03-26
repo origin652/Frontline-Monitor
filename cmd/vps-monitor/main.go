@@ -54,7 +54,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	submitter := cluster.NewSubmitter(clusterManager)
+	submitter := cluster.NewSubmitter(clusterManager, cfg)
 	collector := monitor.NewCollector(cfg, sqliteStore, submitter, logger)
 	prober := monitor.NewProber(cfg, sqliteStore, submitter, logger)
 	notifiers := notify.Build(cfg, logger)
