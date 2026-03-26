@@ -11,6 +11,7 @@
 ## 主要能力
 
 - 每台节点都采集本机 CPU、内存、磁盘、load、uptime
+- 自动探测并展示硬件配置（CPU 型号/核心数、总内存、总磁盘、OS、内核版本）
 - 每台节点都探测另外两台的 SSH、443、额外 TCP 端口和 HTTP 健康检查
 - leader 基于心跳和互探结果计算 `healthy / degraded / critical / unknown`
 - active incident、事件流、入口 DNS 状态会复制到所有节点
@@ -162,6 +163,7 @@ CLOUDFLARE_API_TOKEN=xxxx
 TELEGRAM_BOT_TOKEN=xxxx
 SMTP_PASSWORD=xxxx
 MONITOR_TEST_ALERT_TOKEN=xxxx
+MONITOR_INTERNAL_TOKEN=xxxx
 ```
 
 建议：
@@ -262,6 +264,29 @@ journalctl -u vps-monitor -n 100 --no-pager
 - `checks.services` 使用 `systemctl is-active`
 - `checks.docker_checks` 使用 `docker inspect --format {{.State.Status}}`
 - 对外写接口没有开放；公网只提供只读页面和只读 API
+
+## 安全
+
+### 内部端点保护
+
+当服务运行在反向代理（如 Nginx）后面时，必须配置内部通信 token，否则 `/internal/v1/*` 端点的 IP 校验会被绕过。
+
+在每台节点的环境变量中设置相同的 token：
+
+```bash
+MONITOR_INTERNAL_TOKEN=<你的随机密钥>
+```
+
+生成方式：`openssl rand -base64 32`
+
+也可以在配置中自定义环境变量名：
+
+```yaml
+cluster:
+  internal_token_env: "MY_CUSTOM_TOKEN_ENV"
+```
+
+如果不配置 token，服务回退到基于 IP 的访问控制（仅适用于无反向代理的场景）。
 
 ## 发布到 GitHub
 
