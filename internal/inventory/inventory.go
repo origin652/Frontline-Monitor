@@ -28,6 +28,7 @@ type SharedConfig struct {
 	Network    config.NetworkConfig    `yaml:"network"`
 	Cloudflare config.CloudflareConfig `yaml:"cloudflare"`
 	Checks     config.ChecksConfig     `yaml:"checks"`
+	Runtime    config.RuntimeConfig    `yaml:"runtime"`
 	Thresholds config.Thresholds       `yaml:"thresholds"`
 	Alerts     config.AlertsConfig     `yaml:"alerts"`
 	Storage    config.StorageConfig    `yaml:"storage"`
@@ -201,6 +202,7 @@ func (i *Inventory) renderNode(nodeID string) (*config.Config, error) {
 		Network:    mergeNetwork(i.Shared.Network, node.Network, node.PublicIPv4),
 		Cloudflare: i.Shared.Cloudflare,
 		Checks:     mergeChecks(i.Shared.Checks, node.Checks),
+		Runtime:    i.Shared.Runtime,
 		Thresholds: i.Shared.Thresholds,
 		Alerts:     i.Shared.Alerts,
 		Storage:    mergeStorage(i.Shared.Storage, node.Storage),

@@ -25,6 +25,10 @@ checks:
   http_checks: []
   docker_checks: []
 
+runtime:
+  # Optional. Omit this section to use the default 15s loop interval.
+  loop_interval: 15s
+
 thresholds:
   cpu_warn: 80
   cpu_crit: 92

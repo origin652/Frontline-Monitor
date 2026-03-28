@@ -35,6 +35,10 @@ shared:
     docker_checks:
       - app
 
+  runtime:
+    # Optional. If omitted, rendered configs use the default 15s loop interval.
+    loop_interval: 15s
+
   thresholds:
     cpu_warn: 80
     cpu_crit: 92

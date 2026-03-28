@@ -67,6 +67,10 @@ checks:
   docker_checks:
     - app
 
+runtime:
+  # Optional. If omitted, collector / prober / leader evaluation all default to 15s.
+  loop_interval: 15s
+
 thresholds:
   cpu_warn: 80
   cpu_crit: 92

@@ -70,6 +70,7 @@ func main() {
 		Handler:           webServer.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+	loopInterval := cfg.LoopInterval()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -97,9 +98,9 @@ func main() {
 	}
 
 	if ctx.Err() == nil {
-		go collector.Run(ctx, 15*time.Second)
-		go prober.Run(ctx, 15*time.Second)
-		go engineLoop.Run(ctx, 15*time.Second)
+		go collector.Run(ctx, loopInterval)
+		go prober.Run(ctx, loopInterval)
+		go engineLoop.Run(ctx, loopInterval)
 		go emitBootstrapEvent(ctx, cfg, clusterManager, logger)
 	}
 

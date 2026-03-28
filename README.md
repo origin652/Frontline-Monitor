@@ -135,6 +135,13 @@ go run ./cmd/vps-monitor-render -inventory cluster.inventory.yaml -out build/con
 - `cloudflare.*`
 - `alerts.*`
 
+可选性能参数：
+
+- `runtime.loop_interval`
+  - 控制 collector、prober、leader engine 三个主循环的间隔
+  - 不配置时默认 `15s`
+  - 想进一步省资源，可以调成 `30s` 或 `60s`
+
 动态模式说明：
 
 - `cluster.peers` 为空时即进入动态模式

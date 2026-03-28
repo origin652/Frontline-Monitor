@@ -19,6 +19,7 @@ type Config struct {
 	Network    NetworkConfig    `yaml:"network"`
 	Cloudflare CloudflareConfig `yaml:"cloudflare"`
 	Checks     ChecksConfig     `yaml:"checks"`
+	Runtime    RuntimeConfig    `yaml:"runtime"`
 	Thresholds Thresholds       `yaml:"thresholds"`
 	Alerts     AlertsConfig     `yaml:"alerts"`
 	Storage    StorageConfig    `yaml:"storage"`
@@ -80,6 +81,10 @@ type HTTPCheck struct {
 	Port         int    `yaml:"port"`
 	ExpectStatus int    `yaml:"expect_status"`
 	Timeout      string `yaml:"timeout"`
+}
+
+type RuntimeConfig struct {
+	LoopInterval string `yaml:"loop_interval,omitempty"`
 }
 
 type Thresholds struct {
@@ -205,6 +210,12 @@ func (c *Config) validate(requireRuntimeSecrets bool) error {
 	}
 	if c.Storage.SQLitePath == "" || c.Storage.RaftDir == "" {
 		problems = append(problems, "storage paths are required")
+	}
+	if raw := strings.TrimSpace(c.Runtime.LoopInterval); raw != "" {
+		parsed, err := time.ParseDuration(raw)
+		if err != nil || parsed <= 0 {
+			problems = append(problems, "runtime.loop_interval must be a positive duration")
+		}
 	}
 	if c.UsesStaticPeers() {
 		nodeIDs := map[string]struct{}{}
@@ -341,12 +352,24 @@ func (c *Config) WebhookTimeout() time.Duration {
 	return parseDurationOr(c.Alerts.WeCom.RequestTout, 10*time.Second)
 }
 
+func (c *Config) LoopInterval() time.Duration {
+	return parsePositiveDurationOr(c.Runtime.LoopInterval, 15*time.Second)
+}
+
 func parseDurationOr(raw string, fallback time.Duration) time.Duration {
 	if raw == "" {
 		return fallback
 	}
 	parsed, err := time.ParseDuration(raw)
 	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func parsePositiveDurationOr(raw string, fallback time.Duration) time.Duration {
+	parsed := parseDurationOr(raw, fallback)
+	if parsed <= 0 {
 		return fallback
 	}
 	return parsed

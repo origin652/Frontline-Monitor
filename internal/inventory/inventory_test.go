@@ -21,6 +21,9 @@ func TestRenderNodeMergesSharedSettingsAndOverrides(t *testing.T) {
 				TLSCertFile:     "/etc/ssl/shared.pem",
 				TLSKeyFile:      "/etc/ssl/shared.key",
 			},
+			Runtime: config.RuntimeConfig{
+				LoopInterval: "30s",
+			},
 			Checks: config.ChecksConfig{
 				Services: []string{"ssh", "nginx"},
 				TCPPorts: []int{80, 443},
@@ -118,6 +121,9 @@ func TestRenderNodeMergesSharedSettingsAndOverrides(t *testing.T) {
 	}
 	if cfg.Storage.SQLitePath != "/var/lib/vps-monitor/monitor.db" {
 		t.Fatalf("Storage.SQLitePath = %q, want shared path", cfg.Storage.SQLitePath)
+	}
+	if cfg.Runtime.LoopInterval != "30s" {
+		t.Fatalf("Runtime.LoopInterval = %q, want %q", cfg.Runtime.LoopInterval, "30s")
 	}
 }
 

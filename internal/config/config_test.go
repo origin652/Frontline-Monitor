@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestRaftBindAddrFallback(t *testing.T) {
 	t.Parallel()
@@ -111,5 +114,48 @@ func TestClusterPeerIsIngressCandidate(t *testing.T) {
 				t.Fatalf("IsIngressCandidate() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestLoopIntervalDefaultAndOverride(t *testing.T) {
+	t.Parallel()
+
+	cfg := &Config{}
+	if got := cfg.LoopInterval(); got != 15*time.Second {
+		t.Fatalf("LoopInterval() default = %s, want %s", got, 15*time.Second)
+	}
+
+	cfg.Runtime.LoopInterval = "30s"
+	if got := cfg.LoopInterval(); got != 30*time.Second {
+		t.Fatalf("LoopInterval() override = %s, want %s", got, 30*time.Second)
+	}
+}
+
+func TestValidateRejectsInvalidLoopInterval(t *testing.T) {
+	t.Setenv("MONITOR_INTERNAL_TOKEN", "secret")
+	cfg := &Config{
+		Cluster: ClusterConfig{
+			NodeID:    "node-a",
+			APIAddr:   "10.0.0.11:8443",
+			RaftAddr:  "10.0.0.11:7000",
+			JoinSeeds: []string{"10.0.0.12:8443"},
+		},
+		Network: NetworkConfig{
+			ListenAddr:      ":8443",
+			PublicIPv4:      "203.0.113.11",
+			PublicHTTPSPort: 443,
+		},
+		Runtime: RuntimeConfig{
+			LoopInterval: "0s",
+		},
+		Storage: StorageConfig{
+			DataDir:    "/tmp/data",
+			SQLitePath: "/tmp/data/monitor.db",
+			RaftDir:    "/tmp/data/raft",
+		},
+	}
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want invalid runtime.loop_interval")
 	}
 }
