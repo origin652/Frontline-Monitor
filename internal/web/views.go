@@ -62,16 +62,21 @@ func (s *Server) nodeStates(ctx context.Context, isAdmin bool, resolver nodeName
 		stateMap[state.NodeID] = state
 	}
 
-	out := make([]model.NodeState, 0, len(s.cfg.OrderedPeers()))
-	for _, peer := range s.cfg.OrderedPeers() {
-		if state, ok := stateMap[peer.NodeID]; ok {
+	members, err := s.cluster.OrderedMembers(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]model.NodeState, 0, len(members))
+	for _, member := range members {
+		if state, ok := stateMap[member.NodeID]; ok {
 			s.decorateNodeState(resolver, &state)
 			out = append(out, state)
 			continue
 		}
 		state := model.NodeState{
-			NodeID:          peer.NodeID,
-			NodeName:        resolver.DisplayName(peer.NodeID),
+			NodeID:          member.NodeID,
+			NodeName:        resolver.DisplayName(member.NodeID),
 			Status:          model.StatusUnknown,
 			Reason:          "awaiting cluster data",
 			RuleKey:         "telemetry",

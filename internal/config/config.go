@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"vps-monitor/internal/model"
 )
 
 type Config struct {
@@ -24,21 +26,27 @@ type Config struct {
 
 type ClusterConfig struct {
 	NodeID           string        `yaml:"node_id"`
+	APIAddr          string        `yaml:"api_addr,omitempty"`
+	DisplayName      string        `yaml:"display_name,omitempty"`
 	RaftAddr         string        `yaml:"raft_addr"`
-	RaftBindAddr     string        `yaml:"raft_bind_addr"`
+	RaftBindAddr     string        `yaml:"raft_bind_addr,omitempty"`
 	Peers            []ClusterPeer `yaml:"peers"`
 	Priority         int           `yaml:"priority"`
-	InternalTokenEnv string        `yaml:"internal_token_env"`
+	IngressCandidate *bool         `yaml:"ingress_candidate,omitempty"`
+	Role             string        `yaml:"role,omitempty"`
+	JoinSeeds        []string      `yaml:"join_seeds,omitempty"`
+	Bootstrap        bool          `yaml:"bootstrap,omitempty"`
+	InternalTokenEnv string        `yaml:"internal_token_env,omitempty"`
 }
 
 type ClusterPeer struct {
 	NodeID           string `yaml:"node_id"`
-	DisplayName      string `yaml:"display_name"`
+	DisplayName      string `yaml:"display_name,omitempty"`
 	APIAddr          string `yaml:"api_addr"`
 	RaftAddr         string `yaml:"raft_addr"`
 	PublicIPv4       string `yaml:"public_ipv4"`
 	Priority         int    `yaml:"priority"`
-	IngressCandidate *bool  `yaml:"ingress_candidate"`
+	IngressCandidate *bool  `yaml:"ingress_candidate,omitempty"`
 }
 
 type NetworkConfig struct {
@@ -174,6 +182,14 @@ func defaultConfig(baseDir string) *Config {
 }
 
 func (c *Config) Validate() error {
+	return c.validate(true)
+}
+
+func (c *Config) ValidateForRender() error {
+	return c.validate(false)
+}
+
+func (c *Config) validate(requireRuntimeSecrets bool) error {
 	var problems []string
 	if c.Cluster.NodeID == "" {
 		problems = append(problems, "cluster.node_id is required")
@@ -190,27 +206,38 @@ func (c *Config) Validate() error {
 	if c.Storage.SQLitePath == "" || c.Storage.RaftDir == "" {
 		problems = append(problems, "storage paths are required")
 	}
-	if len(c.Cluster.Peers) == 0 {
-		problems = append(problems, "cluster.peers must list all cluster members, including self")
-	}
-
-	nodeIDs := map[string]struct{}{}
-	foundSelf := false
-	for _, peer := range c.Cluster.Peers {
-		if peer.NodeID == "" || peer.APIAddr == "" || peer.RaftAddr == "" || peer.PublicIPv4 == "" {
-			problems = append(problems, "each cluster peer needs node_id, api_addr, raft_addr, and public_ipv4")
-			continue
+	if c.UsesStaticPeers() {
+		nodeIDs := map[string]struct{}{}
+		foundSelf := false
+		for _, peer := range c.Cluster.Peers {
+			if peer.NodeID == "" || peer.APIAddr == "" || peer.RaftAddr == "" || peer.PublicIPv4 == "" {
+				problems = append(problems, "each cluster peer needs node_id, api_addr, raft_addr, and public_ipv4")
+				continue
+			}
+			if _, exists := nodeIDs[peer.NodeID]; exists {
+				problems = append(problems, "cluster.peers contains duplicate node_id "+peer.NodeID)
+			}
+			nodeIDs[peer.NodeID] = struct{}{}
+			if peer.NodeID == c.Cluster.NodeID {
+				foundSelf = true
+			}
 		}
-		if _, exists := nodeIDs[peer.NodeID]; exists {
-			problems = append(problems, "cluster.peers contains duplicate node_id "+peer.NodeID)
+		if !foundSelf {
+			problems = append(problems, "cluster.peers must contain the local node")
 		}
-		nodeIDs[peer.NodeID] = struct{}{}
-		if peer.NodeID == c.Cluster.NodeID {
-			foundSelf = true
+	} else {
+		if strings.TrimSpace(c.Cluster.APIAddr) == "" {
+			problems = append(problems, "cluster.api_addr is required when cluster.peers is empty")
 		}
-	}
-	if !foundSelf {
-		problems = append(problems, "cluster.peers must contain the local node")
+		if !model.IsValidClusterMemberRole(c.Cluster.Role) {
+			problems = append(problems, "cluster.role must be voter or nonvoter")
+		}
+		if !c.Cluster.Bootstrap && len(c.NormalizedJoinSeeds()) == 0 {
+			problems = append(problems, "dynamic mode requires cluster.bootstrap=true or at least one cluster.join_seeds entry")
+		}
+		if requireRuntimeSecrets && c.InternalToken() == "" {
+			problems = append(problems, "dynamic mode requires the internal token environment variable to be set")
+		}
 	}
 
 	if c.Cloudflare.Enabled {
@@ -232,12 +259,13 @@ func (c *Config) SelfPeer() ClusterPeer {
 		}
 	}
 	return ClusterPeer{
-		NodeID:      c.Cluster.NodeID,
-		DisplayName: c.Cluster.NodeID,
-		APIAddr:     c.Network.ListenAddr,
-		RaftAddr:    c.Cluster.RaftAddr,
-		PublicIPv4:  c.Network.PublicIPv4,
-		Priority:    c.Cluster.Priority,
+		NodeID:           c.Cluster.NodeID,
+		DisplayName:      c.DefaultDisplayName(),
+		APIAddr:          c.APIAddr(),
+		RaftAddr:         c.Cluster.RaftAddr,
+		PublicIPv4:       c.Network.PublicIPv4,
+		Priority:         c.Cluster.Priority,
+		IngressCandidate: c.Cluster.IngressCandidate,
 	}
 }
 
@@ -253,6 +281,9 @@ func (c *Config) PeerByID(nodeID string) (ClusterPeer, bool) {
 		if peer.NodeID == nodeID {
 			return peer, true
 		}
+	}
+	if strings.TrimSpace(nodeID) == strings.TrimSpace(c.Cluster.NodeID) {
+		return c.SelfPeer(), true
 	}
 	return ClusterPeer{}, false
 }
@@ -278,6 +309,9 @@ func (c *Config) PeerDisplayName(nodeID string) string {
 
 func (c *Config) OrderedPeers() []ClusterPeer {
 	peers := append([]ClusterPeer(nil), c.Cluster.Peers...)
+	if len(peers) == 0 {
+		peers = append(peers, c.SelfPeer())
+	}
 	slices.SortFunc(peers, func(a, b ClusterPeer) int {
 		if a.Priority != b.Priority {
 			return b.Priority - a.Priority
@@ -324,6 +358,52 @@ func (c *Config) InternalToken() string {
 		env = "MONITOR_INTERNAL_TOKEN"
 	}
 	return os.Getenv(env)
+}
+
+func (c *Config) UsesStaticPeers() bool {
+	return len(c.Cluster.Peers) > 0
+}
+
+func (c *Config) UsesDynamicMembership() bool {
+	return !c.UsesStaticPeers()
+}
+
+func (c *Config) APIAddr() string {
+	if apiAddr := strings.TrimSpace(c.Cluster.APIAddr); apiAddr != "" {
+		return apiAddr
+	}
+	if peer, ok := c.PeerByID(c.Cluster.NodeID); ok && strings.TrimSpace(peer.APIAddr) != "" {
+		return strings.TrimSpace(peer.APIAddr)
+	}
+	return strings.TrimSpace(c.Network.ListenAddr)
+}
+
+func (c *Config) DefaultDisplayName() string {
+	if strings.TrimSpace(c.Cluster.DisplayName) != "" {
+		return strings.TrimSpace(c.Cluster.DisplayName)
+	}
+	return c.Cluster.NodeID
+}
+
+func (c *Config) NormalizedRole() string {
+	return model.NormalizeClusterMemberRole(c.Cluster.Role)
+}
+
+func (c *Config) NormalizedJoinSeeds() []string {
+	out := make([]string, 0, len(c.Cluster.JoinSeeds))
+	seen := map[string]struct{}{}
+	for _, seed := range c.Cluster.JoinSeeds {
+		seed = strings.TrimSpace(seed)
+		if seed == "" {
+			continue
+		}
+		if _, ok := seen[seed]; ok {
+			continue
+		}
+		seen[seed] = struct{}{}
+		out = append(out, seed)
+	}
+	return out
 }
 
 func (p ClusterPeer) DisplayNameOrNodeID() string {

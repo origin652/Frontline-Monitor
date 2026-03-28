@@ -9,24 +9,27 @@ import (
 	"net/http"
 	"time"
 
+	"vps-monitor/internal/cluster"
 	"vps-monitor/internal/config"
 	"vps-monitor/internal/model"
 )
 
 type Prober struct {
-	cfg    *config.Config
-	checks MonitorCheckSource
-	sink   ObservationSink
-	logger *slog.Logger
-	client *http.Client
+	cfg     *config.Config
+	cluster *cluster.Manager
+	checks  MonitorCheckSource
+	sink    ObservationSink
+	logger  *slog.Logger
+	client  *http.Client
 }
 
-func NewProber(cfg *config.Config, checks MonitorCheckSource, sink ObservationSink, logger *slog.Logger) *Prober {
+func NewProber(cfg *config.Config, clusterManager *cluster.Manager, checks MonitorCheckSource, sink ObservationSink, logger *slog.Logger) *Prober {
 	return &Prober{
-		cfg:    cfg,
-		checks: checks,
-		sink:   sink,
-		logger: logger,
+		cfg:     cfg,
+		cluster: clusterManager,
+		checks:  checks,
+		sink:    sink,
+		logger:  logger,
 		client: &http.Client{
 			Timeout: 5 * time.Second,
 		},
@@ -49,7 +52,7 @@ func (p *Prober) Run(ctx context.Context, interval time.Duration) {
 }
 
 func (p *Prober) probeOnce(ctx context.Context) {
-	peers := p.remotePeers()
+	peers := p.remotePeers(ctx)
 	if len(peers) == 0 {
 		p.logger.Debug("skip prober tick", "reason", errNoPeers)
 		return
@@ -109,13 +112,26 @@ func (p *Prober) probePeer(ctx context.Context, peer config.ClusterPeer, checks 
 	}
 }
 
-func (p *Prober) remotePeers() []config.ClusterPeer {
-	var peers []config.ClusterPeer
-	for _, peer := range p.cfg.Cluster.Peers {
-		if peer.NodeID == p.cfg.Cluster.NodeID {
+func (p *Prober) remotePeers(ctx context.Context) []config.ClusterPeer {
+	members, err := p.cluster.ActiveMembers(ctx)
+	if err != nil {
+		p.logger.Error("list cluster members for prober failed", "error", err)
+		return nil
+	}
+	peers := make([]config.ClusterPeer, 0, len(members))
+	for _, member := range members {
+		if member.NodeID == p.cfg.Cluster.NodeID {
 			continue
 		}
-		peers = append(peers, peer)
+		peers = append(peers, config.ClusterPeer{
+			NodeID:           member.NodeID,
+			DisplayName:      member.DisplayName,
+			APIAddr:          member.APIAddr,
+			RaftAddr:         member.RaftAddr,
+			PublicIPv4:       member.PublicIPv4,
+			Priority:         member.Priority,
+			IngressCandidate: member.IngressCandidate,
+		})
 	}
 	return peers
 }

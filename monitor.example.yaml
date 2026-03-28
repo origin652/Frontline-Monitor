@@ -1,8 +1,18 @@
 cluster:
   node_id: node-a
+  api_addr: 10.0.0.11:8443
+  display_name: Tokyo-1
   raft_addr: 10.0.0.11:7000
   raft_bind_addr: 0.0.0.0:7000
   priority: 300
+  internal_token_env: MONITOR_INTERNAL_TOKEN
+  # Dynamic mode:
+  # role: voter
+  # bootstrap: true
+  # join_seeds:
+  #   - 10.0.0.12:8443
+  #
+  # Static compatibility mode:
   peers:
     - node_id: node-a
       display_name: Tokyo-1

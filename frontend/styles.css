@@ -1948,6 +1948,30 @@ body {
   gap: 1rem;
 }
 
+.admin-member-row {
+  gap: 0.85rem;
+}
+
+.admin-member-row__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.admin-member-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.7rem;
+  padding: 0.25rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+  background: color-mix(in srgb, var(--surface-panel-alt, var(--bg-elevated)) 76%, transparent);
+  color: var(--muted);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .obs-page {
   width: min(1360px, 100%);
   gap: 1rem;

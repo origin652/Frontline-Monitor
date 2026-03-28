@@ -28,6 +28,7 @@ const (
 	CommandDeleteCheck     = "delete_check"
 	CommandNodeDisplayName = "node_display_name"
 	CommandDeleteNodeName  = "delete_node_display_name"
+	CommandClusterMember   = "cluster_member"
 )
 
 type commandEnvelope struct {
@@ -184,6 +185,14 @@ func (f *FSM) Apply(logEntry *raft.Log) any {
 			return CommandResult{Error: err.Error()}
 		}
 		if err := f.store.UpsertNodeDisplayName(ctx, item); err != nil {
+			return CommandResult{Error: err.Error()}
+		}
+	case CommandClusterMember:
+		var item model.ClusterMember
+		if err := json.Unmarshal(env.Payload, &item); err != nil {
+			return CommandResult{Error: err.Error()}
+		}
+		if err := f.store.UpsertClusterMember(ctx, item); err != nil {
 			return CommandResult{Error: err.Error()}
 		}
 	case CommandDeleteNodeName:

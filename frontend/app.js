@@ -257,6 +257,7 @@
   let activeMeta = {};
   let currentAdminChecks = [];
   let currentAdminNodes = [];
+  let currentAdminMembers = [];
   let activeAdminCheckID = "";
   let activeAdminNodeID = "";
 
@@ -680,6 +681,15 @@
     node.textContent = localizeText(message || "");
   }
 
+  function setAdminMemberNotice(message, isError) {
+    const node = document.getElementById("admin-member-notice");
+    if (!node) {
+      return;
+    }
+    node.className = "admin-notice" + (isError ? " is-error" : "");
+    node.textContent = localizeText(message || "");
+  }
+
   function handleAdminAction(button) {
     const action = button.dataset.adminAction || "";
     if (action === "edit-check") {
@@ -704,6 +714,18 @@
     }
     if (action === "reset-node-name") {
       deleteAdminNodeName(button.dataset.nodeId || "");
+      return;
+    }
+    if (action === "promote-member") {
+      updateAdminMemberRole(button.dataset.nodeId || "", "voter");
+      return;
+    }
+    if (action === "demote-member") {
+      updateAdminMemberRole(button.dataset.nodeId || "", "nonvoter");
+      return;
+    }
+    if (action === "remove-member") {
+      deleteAdminMember(button.dataset.nodeId || "");
     }
   }
 
@@ -1229,14 +1251,17 @@
     }));
     let checks = [];
     let nodes = [];
+    let members = [];
     if (meta.is_admin) {
-      [checks, nodes] = await Promise.all([
+      [checks, nodes, members] = await Promise.all([
         fetchJSON("/api/v1/admin/checks").catch(() => []),
-        fetchJSON("/api/v1/admin/nodes").catch(() => [])
+        fetchJSON("/api/v1/admin/nodes").catch(() => []),
+        fetchJSON("/api/v1/admin/members").catch(() => [])
       ]);
     }
     currentAdminChecks = Array.isArray(checks) ? checks : [];
     currentAdminNodes = Array.isArray(nodes) ? nodes : [];
+    currentAdminMembers = Array.isArray(members) ? members : [];
 
     return {
       page: "admin",
@@ -1249,7 +1274,7 @@
       leaderName: nodeLabelFrom(meta.leader_name, meta.leader_id),
       meta: meta,
       generatedAt: new Date().toISOString(),
-      content: renderAdminPage(meta, checks, nodes),
+      content: renderAdminPage(meta, checks, nodes, members),
       searchIndex: buildSearchIndex({
         snapshot: { node_id: meta.node_id, node_name: meta.node_name, nodes: [], events: [], incidents: [] },
         incidents: [],
@@ -1542,9 +1567,10 @@
     `;
   }
 
-  function renderAdminPage(meta, checks, nodes) {
+  function renderAdminPage(meta, checks, nodes, members) {
     const list = Array.isArray(checks) ? checks : [];
     const nodeList = Array.isArray(nodes) ? nodes : [];
+    const memberList = Array.isArray(members) ? members : [];
     const initialized = Boolean(meta && meta.admin_initialized);
     const isAdmin = Boolean(meta && meta.is_admin);
 
@@ -1822,6 +1848,22 @@
             </div>
           </article>
         </section>
+
+        <section class="obs-section admin-panel">
+          <div class="obs-section__head">
+            <div>
+              <p class="obs-section__eyebrow">Cluster Membership</p>
+              <h2>集群成员</h2>
+            </div>
+            <p>这里直接管理运行时成员目录和 Raft 角色。新节点 auto-join 后会自动出现在这里，不需要再手改其它节点的 <code>cluster.peers</code>。</p>
+          </div>
+          <div class="admin-check-list">
+            ${memberList.length > 0
+              ? memberList.map((member) => renderAdminMemberRow(member, meta)).join("")
+              : emptyRune("还没有成员数据", "如果你刚完成动态模式升级，等 leader 完成第一次成员目录同步后这里会出现。")}
+          </div>
+          <p id="admin-member-notice" class="admin-notice"></p>
+        </section>
       </main>
     `;
   }
@@ -1864,6 +1906,44 @@
     `;
   }
 
+  function renderAdminMemberRow(member, meta) {
+    const nodeID = member && member.node_id ? member.node_id : "";
+    const currentRole = member && member.current_role ? member.current_role : (member && member.desired_role ? member.desired_role : "voter");
+    const canPromote = member && member.status === "active" && currentRole !== "voter";
+    const canDemote = member && member.status === "active" && currentRole === "voter";
+    const canRemove = member && member.status === "active";
+    const isCurrentNode = nodeID && meta && nodeID === meta.node_id;
+
+    return `
+      <article class="service-row status-surface admin-check-row admin-member-row" data-status="${escapeHTML(adminMemberStatusTone(member))}" data-node-id="${escapeHTML(nodeID)}">
+        <div class="admin-check-row__head">
+          <div>
+            <strong>${escapeHTML(member && member.effective_display_name ? member.effective_display_name : nodeID || "-")}</strong>
+            <span>${escapeHTML(nodeID || "-")} · ${escapeHTML(adminMemberBadgeLine(member, meta))}</span>
+          </div>
+          <div class="admin-check-row__actions">
+            ${canPromote
+              ? `<button type="button" class="admin-button admin-button--secondary" data-admin-action="promote-member" data-node-id="${escapeHTML(nodeID)}">升为 voter</button>`
+              : ""}
+            ${canDemote
+              ? `<button type="button" class="admin-button admin-button--secondary" data-admin-action="demote-member" data-node-id="${escapeHTML(nodeID)}">降为 nonvoter</button>`
+              : ""}
+            ${canRemove
+              ? `<button type="button" class="admin-button admin-button--danger" data-admin-action="remove-member" data-node-id="${escapeHTML(nodeID)}">${escapeHTML(isCurrentNode ? "移除当前节点" : "移除节点")}</button>`
+              : ""}
+          </div>
+        </div>
+        <div class="admin-member-row__facts">
+          <span class="admin-member-chip">${escapeHTML("role " + currentRole)}</span>
+          <span class="admin-member-chip">${escapeHTML("desired " + (member && member.desired_role ? member.desired_role : currentRole))}</span>
+          <span class="admin-member-chip">${escapeHTML("health " + adminMemberHealthLabel(member))}</span>
+          <span class="admin-member-chip">${escapeHTML("heartbeat " + adminMemberHeartbeatLabel(member))}</span>
+        </div>
+        <small>${escapeHTML(describeAdminMember(member))}</small>
+      </article>
+    `;
+  }
+
   function formatAdminNodeOption(node) {
     const effective = node && node.effective_display_name ? node.effective_display_name : nodeLabelFrom("", node && node.node_id);
     const nodeID = node && node.node_id ? node.node_id : "-";
@@ -1893,6 +1973,66 @@
     return getCurrentLanguage() === "en"
       ? "using node_id as the default display name"
       : "使用 node_id 作为默认显示名称";
+  }
+
+  function adminMemberStatusTone(member) {
+    if (!member || member.status !== "active") {
+      return "unknown";
+    }
+    return normalizeStatus(member.health_status || "unknown");
+  }
+
+  function adminMemberBadgeLine(member, meta) {
+    const parts = [];
+    if (member && member.is_leader) {
+      parts.push("leader");
+    }
+    if (member && member.status) {
+      parts.push(member.status);
+    }
+    if (member && member.current_role) {
+      parts.push(member.current_role);
+    } else if (member && member.desired_role) {
+      parts.push(member.desired_role);
+    }
+    if (member && meta && member.node_id === meta.node_id) {
+      parts.push("self");
+    }
+    return parts.join(" · ");
+  }
+
+  function adminMemberHealthLabel(member) {
+    if (!member || !member.health_status) {
+      return getCurrentLanguage() === "en" ? "unknown" : "未知";
+    }
+    return statusLabel(member.health_status);
+  }
+
+  function adminMemberHeartbeatLabel(member) {
+    if (!member || !member.last_heartbeat_at) {
+      return getCurrentLanguage() === "en" ? "no signal" : "无信号";
+    }
+    return timeAgo(member.last_heartbeat_at);
+  }
+
+  function describeAdminMember(member) {
+    if (!member) {
+      return "";
+    }
+    const parts = [
+      member.api_addr ? "API " + member.api_addr : "",
+      member.raft_addr ? "Raft " + member.raft_addr : "",
+      member.public_ipv4 ? "IP " + member.public_ipv4 : "",
+      typeof member.priority === "number" ? "priority " + String(member.priority) : "",
+      member.ingress_candidate === false ? "ingress disabled" : "ingress candidate"
+    ].filter(Boolean);
+    if (member.updated_at) {
+      parts.push((getCurrentLanguage() === "en" ? "updated " : "更新于 ") + formatDateTime(member.updated_at));
+    }
+    if (member.removed_at) {
+      parts.push((getCurrentLanguage() === "en" ? "removed " : "移除于 ") + formatDateTime(member.removed_at));
+    }
+    return parts.join(" · ");
   }
 
   function describeAdminCheck(check) {
@@ -3920,6 +4060,45 @@
       renderRoute();
     } catch (error) {
       setAdminNodeNotice(error.message || "恢复默认名称失败", true);
+    }
+  }
+
+  async function updateAdminMemberRole(nodeID, role) {
+    if (!nodeID || !role) {
+      return;
+    }
+    const actionLabel = role === "voter" ? "提升为 voter" : "降为 nonvoter";
+    setAdminMemberNotice("正在" + actionLabel + "...", false);
+    try {
+      await requestJSON("/api/v1/admin/members/" + encodeURIComponent(nodeID) + "/role", {
+        method: "PUT",
+        body: {
+          role: role
+        }
+      });
+      setAdminMemberNotice(actionLabel + "完成。", false);
+      renderRoute();
+    } catch (error) {
+      setAdminMemberNotice(error.message || (actionLabel + "失败"), true);
+    }
+  }
+
+  async function deleteAdminMember(nodeID) {
+    if (!nodeID) {
+      return;
+    }
+    if (!window.confirm(localizeText("确认移除节点 " + nodeID + " 吗？这个操作会把它从当前集群成员列表和 Raft 配置里删掉。"))) {
+      return;
+    }
+    setAdminMemberNotice("正在移除节点...", false);
+    try {
+      await requestJSON("/api/v1/admin/members/" + encodeURIComponent(nodeID), {
+        method: "DELETE"
+      });
+      setAdminMemberNotice("节点已移除。", false);
+      renderRoute();
+    } catch (error) {
+      setAdminMemberNotice(error.message || "移除节点失败", true);
     }
   }
 

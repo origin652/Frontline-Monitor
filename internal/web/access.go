@@ -32,6 +32,17 @@ func (s *Server) requireInternalRequest(r *http.Request) error {
 	}
 
 	allowed := map[string]struct{}{}
+	members, err := s.cluster.ActiveMembers(r.Context())
+	if err == nil {
+		for _, member := range members {
+			if member.PublicIPv4 != "" {
+				allowed[member.PublicIPv4] = struct{}{}
+			}
+			if apiHost := remoteHost(member.APIAddr); apiHost != "" {
+				allowed[apiHost] = struct{}{}
+			}
+		}
+	}
 	for _, peer := range s.cfg.Cluster.Peers {
 		if peer.PublicIPv4 != "" {
 			allowed[peer.PublicIPv4] = struct{}{}

@@ -313,7 +313,12 @@ func (s *Server) handleAdminNodeByID(w http.ResponseWriter, r *http.Request) {
 		s.renderError(w, http.StatusBadRequest, fmt.Errorf("nodeID is required"))
 		return
 	}
-	if _, ok := s.cfg.PeerByID(nodeID); !ok {
+	member, ok, err := s.cluster.MemberByID(r.Context(), nodeID)
+	if err != nil {
+		s.renderError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !ok || !member.IsActive() {
 		s.renderError(w, http.StatusNotFound, fmt.Errorf("unknown node %q", nodeID))
 		return
 	}
@@ -337,7 +342,7 @@ func (s *Server) handleAdminNodeByID(w http.ResponseWriter, r *http.Request) {
 			}
 			writeJSON(w, http.StatusOK, map[string]any{
 				"ok":                     true,
-				"effective_display_name": s.cfg.PeerDisplayName(nodeID),
+				"effective_display_name": resolverDisplayNameOrNodeID(s, r.Context(), nodeID),
 			})
 			return
 		}
@@ -361,7 +366,7 @@ func (s *Server) handleAdminNodeByID(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok":                     true,
-			"effective_display_name": s.cfg.PeerDisplayName(nodeID),
+			"effective_display_name": resolverDisplayNameOrNodeID(s, r.Context(), nodeID),
 		})
 	default:
 		http.NotFound(w, r)
@@ -373,14 +378,18 @@ func (s *Server) listAdminNodeDisplayNames(ctx context.Context) ([]adminNodeDisp
 	if err != nil {
 		return nil, err
 	}
-	nodes := make([]adminNodeDisplayNameView, 0, len(s.cfg.OrderedPeers()))
-	for _, peer := range s.cfg.OrderedPeers() {
+	members, err := s.cluster.OrderedMembers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	nodes := make([]adminNodeDisplayNameView, 0, len(members))
+	for _, member := range members {
 		item := adminNodeDisplayNameView{
-			NodeID:               peer.NodeID,
-			ConfigDisplayName:    resolver.ConfigDisplayName(peer.NodeID),
-			EffectiveDisplayName: resolver.DisplayName(peer.NodeID),
+			NodeID:               member.NodeID,
+			ConfigDisplayName:    resolver.ConfigDisplayName(member.NodeID),
+			EffectiveDisplayName: resolver.DisplayName(member.NodeID),
 		}
-		if override, ok := resolver.Override(peer.NodeID); ok {
+		if override, ok := resolver.Override(member.NodeID); ok {
 			item.DisplayName = override.DisplayName
 			updatedAt := override.UpdatedAt
 			item.UpdatedAt = &updatedAt
@@ -489,9 +498,21 @@ func normalizeNodeDisplayName(displayName string) (string, error) {
 
 func (s *Server) validateMonitorCheckScope(check model.MonitorCheck) error {
 	for _, nodeID := range check.NodeIDs {
-		if _, ok := s.cfg.PeerByID(nodeID); !ok {
+		member, ok, err := s.cluster.MemberByID(context.Background(), nodeID)
+		if err != nil {
+			return err
+		}
+		if !ok || !member.IsActive() {
 			return fmt.Errorf("unknown node %q in node_ids", nodeID)
 		}
 	}
 	return nil
+}
+
+func resolverDisplayNameOrNodeID(s *Server, ctx context.Context, nodeID string) string {
+	resolver, err := s.newNodeNameResolver(ctx)
+	if err != nil {
+		return nodeID
+	}
+	return resolver.DisplayName(nodeID)
 }

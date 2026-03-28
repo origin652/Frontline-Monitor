@@ -66,12 +66,18 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/admin/checks", s.handleAdminChecks)
 	mux.HandleFunc("PUT /api/v1/admin/checks/{id}", s.handleAdminCheckByID)
 	mux.HandleFunc("DELETE /api/v1/admin/checks/{id}", s.handleAdminCheckByID)
+	mux.HandleFunc("GET /api/v1/admin/members", s.handleAdminMembers)
+	mux.HandleFunc("PUT /api/v1/admin/members/{nodeID}/role", s.handleAdminMemberRole)
+	mux.HandleFunc("DELETE /api/v1/admin/members/{nodeID}", s.handleAdminMemberByID)
 	mux.HandleFunc("GET /api/v1/admin/nodes", s.handleAdminNodes)
 	mux.HandleFunc("PUT /api/v1/admin/nodes/{nodeID}", s.handleAdminNodeByID)
 	mux.HandleFunc("DELETE /api/v1/admin/nodes/{nodeID}", s.handleAdminNodeByID)
 	mux.HandleFunc("POST /internal/v1/observations/heartbeat", s.handleInternalHeartbeat)
 	mux.HandleFunc("POST /internal/v1/observations/probe", s.handleInternalProbe)
 	mux.HandleFunc("POST /internal/v1/cluster/apply", s.handleInternalApply)
+	mux.HandleFunc("POST /internal/v1/cluster/join", s.handleInternalJoin)
+	mux.HandleFunc("PUT /internal/v1/cluster/members/{nodeID}/role", s.handleInternalMemberRole)
+	mux.HandleFunc("DELETE /internal/v1/cluster/members/{nodeID}", s.handleInternalMemberByID)
 	return mux
 }
 

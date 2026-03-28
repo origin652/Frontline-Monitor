@@ -24,6 +24,7 @@ type SnapshotData struct {
 	MetricSamples    []model.NodeHeartbeat    `json:"metric_samples"`
 	ProbeSamples     []model.ProbeObservation `json:"probe_samples"`
 	NodeStates       []model.NodeState        `json:"node_states"`
+	ClusterMembers   []model.ClusterMember    `json:"cluster_members,omitempty"`
 	Incidents        []model.Incident         `json:"incidents"`
 	AlertDeliveries  []model.AlertDelivery    `json:"alert_deliveries"`
 	Events           []model.Event            `json:"events"`
@@ -175,6 +176,21 @@ func (s *Store) init(ctx context.Context) error {
 			display_name TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS cluster_members (
+			node_id TEXT PRIMARY KEY,
+			display_name TEXT NOT NULL,
+			api_addr TEXT NOT NULL,
+			raft_addr TEXT NOT NULL,
+			public_ipv4 TEXT NOT NULL,
+			priority INTEGER NOT NULL,
+			ingress_candidate INTEGER,
+			desired_role TEXT NOT NULL,
+			status TEXT NOT NULL,
+			joined_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			removed_at TEXT
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_cluster_members_status_priority ON cluster_members(status, priority DESC, node_id ASC)`,
 	}
 
 	for _, stmt := range statements {
@@ -641,6 +657,10 @@ func (s *Store) Snapshot(ctx context.Context) (*SnapshotData, error) {
 	if err != nil {
 		return nil, err
 	}
+	clusterMembers, err := s.ListClusterMembers(ctx)
+	if err != nil {
+		return nil, err
+	}
 	incidents, err := s.ListIncidents(ctx, "", 0)
 	if err != nil {
 		return nil, err
@@ -677,6 +697,7 @@ func (s *Store) Snapshot(ctx context.Context) (*SnapshotData, error) {
 		MetricSamples:    metrics,
 		ProbeSamples:     probes,
 		NodeStates:       nodeStates,
+		ClusterMembers:   clusterMembers,
 		Incidents:        incidents,
 		AlertDeliveries:  deliveries,
 		Events:           events,
@@ -707,6 +728,7 @@ func (s *Store) Restore(ctx context.Context, snap SnapshotData) error {
 		`DELETE FROM admin_sessions`,
 		`DELETE FROM monitor_checks`,
 		`DELETE FROM node_display_names`,
+		`DELETE FROM cluster_members`,
 	} {
 		if _, err := tx.ExecContext(ctx, stmt); err != nil {
 			return err
@@ -849,6 +871,29 @@ func (s *Store) Restore(ctx context.Context, snap SnapshotData) error {
 			INSERT INTO node_display_names (node_id, display_name, updated_at)
 			VALUES (?, ?, ?)`,
 			item.NodeID, item.DisplayName, item.UpdatedAt.Format(timeLayout),
+		); err != nil {
+			return err
+		}
+	}
+
+	for _, item := range snap.ClusterMembers {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO cluster_members (
+				node_id, display_name, api_addr, raft_addr, public_ipv4, priority, ingress_candidate, desired_role,
+				status, joined_at, updated_at, removed_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			item.NodeID,
+			item.DisplayName,
+			item.APIAddr,
+			item.RaftAddr,
+			item.PublicIPv4,
+			item.Priority,
+			boolPointerToDB(item.IngressCandidate),
+			item.DesiredRole,
+			item.Status,
+			item.JoinedAt.Format(timeLayout),
+			item.UpdatedAt.Format(timeLayout),
+			nullTimeString(item.RemovedAt),
 		); err != nil {
 			return err
 		}

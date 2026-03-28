@@ -20,6 +20,62 @@ func TestRaftBindAddrFallback(t *testing.T) {
 	}
 }
 
+func TestValidateDynamicClusterRequiresAPIAddrTokenAndJoin(t *testing.T) {
+	t.Setenv("MONITOR_INTERNAL_TOKEN", "secret")
+	cfg := &Config{
+		Cluster: ClusterConfig{
+			NodeID:      "node-a",
+			APIAddr:     "10.0.0.11:8443",
+			RaftAddr:    "10.0.0.11:7000",
+			JoinSeeds:   []string{"10.0.0.12:8443"},
+			Role:        "voter",
+			Bootstrap:   false,
+			Priority:    100,
+			DisplayName: "Tokyo-1",
+		},
+		Network: NetworkConfig{
+			ListenAddr:      ":8443",
+			PublicIPv4:      "203.0.113.11",
+			PublicHTTPSPort: 443,
+		},
+		Storage: StorageConfig{
+			DataDir:    "/tmp/data",
+			SQLitePath: "/tmp/data/monitor.db",
+			RaftDir:    "/tmp/data/raft",
+		},
+	}
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
+func TestValidateDynamicClusterRejectsMissingJoinTarget(t *testing.T) {
+	t.Setenv("MONITOR_INTERNAL_TOKEN", "secret")
+	cfg := &Config{
+		Cluster: ClusterConfig{
+			NodeID:   "node-a",
+			APIAddr:  "10.0.0.11:8443",
+			RaftAddr: "10.0.0.11:7000",
+			Role:     "voter",
+		},
+		Network: NetworkConfig{
+			ListenAddr:      ":8443",
+			PublicIPv4:      "203.0.113.11",
+			PublicHTTPSPort: 443,
+		},
+		Storage: StorageConfig{
+			DataDir:    "/tmp/data",
+			SQLitePath: "/tmp/data/monitor.db",
+			RaftDir:    "/tmp/data/raft",
+		},
+	}
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want join validation failure")
+	}
+}
+
 func TestClusterPeerIsIngressCandidate(t *testing.T) {
 	t.Parallel()
 

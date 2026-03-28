@@ -1,0 +1,107 @@
+cluster:
+  mode: dynamic
+  internal_token_env: MONITOR_INTERNAL_TOKEN
+
+shared:
+  network:
+    listen_addr: :8443
+    public_https_port: 443
+    tls_cert_file: /etc/ssl/cloudflare-origin.pem
+    tls_key_file: /etc/ssl/cloudflare-origin.key
+
+  cloudflare:
+    enabled: true
+    hostname: monitor.example.com
+    zone_id: your-zone-id
+    dns_record_id: your-record-id
+    api_token_env: CLOUDFLARE_API_TOKEN
+    request_timeout: 10s
+
+  checks:
+    services:
+      - ssh
+      - nginx
+      - docker
+    tcp_ports:
+      - 80
+      - 443
+    http_checks:
+      - name: health
+        scheme: https
+        path: /healthz
+        port: 443
+        expect_status: 200
+        timeout: 3s
+    docker_checks:
+      - app
+
+  thresholds:
+    cpu_warn: 80
+    cpu_crit: 92
+    mem_warn: 85
+    mem_crit: 95
+    disk_warn: 80
+    disk_crit: 92
+
+  alerts:
+    telegram:
+      enabled: true
+      bot_token_env: TELEGRAM_BOT_TOKEN
+      chat_id: "123456789"
+      parse_mode: Markdown
+      request_timeout: 10s
+    smtp:
+      enabled: false
+      host: smtp.example.com
+      port: 587
+      username: ops@example.com
+      password_env: SMTP_PASSWORD
+      from: ops@example.com
+      to:
+        - you@example.com
+      request_timeout: 15s
+      use_starttls: true
+      subject_prefix: "[Frontline]"
+    wecom_or_feishu:
+      enabled: false
+      webhook_url: https://open.feishu.cn/open-apis/bot/v2/hook/xxxx
+      secret_env: FEISHU_SECRET
+      request_timeout: 10s
+      title_prefix: "[Frontline] "
+
+  storage:
+    data_dir: /var/lib/vps-monitor
+    sqlite_path: /var/lib/vps-monitor/monitor.db
+    raft_dir: /var/lib/vps-monitor/raft
+    retention_days: 30
+
+nodes:
+  - node_id: node-a
+    display_name: Tokyo-1
+    api_addr: 10.0.0.11:8443
+    raft_addr: 10.0.0.11:7000
+    raft_bind_addr: 0.0.0.0:7000
+    public_ipv4: 203.0.113.11
+    priority: 300
+
+  - node_id: node-b
+    display_name: Singapore-1
+    api_addr: 10.0.0.12:8443
+    raft_addr: 10.0.0.12:7000
+    raft_bind_addr: 0.0.0.0:7000
+    public_ipv4: 203.0.113.12
+    priority: 200
+
+  - node_id: node-c
+    display_name: Frankfurt-1
+    api_addr: 10.0.0.13:8443
+    raft_addr: 10.0.0.13:7000
+    raft_bind_addr: 0.0.0.0:7000
+    public_ipv4: 203.0.113.13
+    priority: 100
+    ingress_candidate: false
+    role: nonvoter
+    checks:
+      services:
+        - ssh
+        - docker

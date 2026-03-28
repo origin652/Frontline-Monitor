@@ -4,6 +4,7 @@
 
 - 3 节点互探
 - `hashicorp/raft` 自动选主
+- 动态成员目录 + seed auto-join
 - SQLite 本地物化视图
 - Cloudflare Free 固定域名接入
 - 同仓前后端分离仪表盘
@@ -15,6 +16,8 @@
 - 每台节点都探测另外两台的 SSH、443、额外 TCP 端口和 HTTP 健康检查
 - leader 基于心跳和互探结果计算 `healthy / degraded / critical / unknown`
 - active incident、事件流、入口 DNS 状态会复制到所有节点
+- 新节点可通过 `join_seeds` 自动加入，旧节点会在运行时自动看到它
+- `/admin` 里可以直接查看 Cluster Membership，并做角色调整或移除
 - 页面可以从任意健康节点访问
 
 ## 项目结构
@@ -78,22 +81,75 @@ vps-monitor.exe -config monitor.local.yaml
 
 ## 生产部署
 
+### 推荐：动态模式 + 单一清单生成各节点配置
+
+现在更推荐直接用动态成员模式部署。这样新增节点时，不需要再给所有老节点改 `cluster.peers`。
+
+1. 复制 [cluster.inventory.example.yaml](cluster.inventory.example.yaml) 为 `cluster.inventory.yaml`
+2. 保持 `cluster.mode: dynamic`
+3. 只在这一个文件里维护节点列表和共享配置
+4. 运行：
+
+```bash
+go run ./cmd/vps-monitor-render -inventory cluster.inventory.yaml -out build/configs
+```
+
+会生成：
+
+- `build/configs/node-a/monitor.yaml`
+- `build/configs/node-b/monitor.yaml`
+- `build/configs/node-c/monitor.yaml`
+
+这个工作流的特点：
+
+- 新增节点时，只需要改一份 `cluster.inventory.yaml`
+- 旧节点不需要再手工编辑配置内容
+- 首个节点会自动生成 `cluster.bootstrap: true`
+- 其余节点会自动生成 `cluster.join_seeds`
+- 新增节点时，通常只需要下发新节点自己的配置并启动它，旧节点会通过成员目录自动看到它
+
+如果你还想保留旧的静态方式，也可以把 inventory 里的 `cluster.mode` 省略或显式写成 `static`，这样渲染结果仍然会包含完整的 `cluster.peers`。
+
+如果你要新增一个节点，推荐流程是：
+
+1. 在 `cluster.inventory.yaml` 里追加新节点
+2. 重新运行 `vps-monitor-render`
+3. 把新节点对应的 `monitor.yaml` 下发到新机器
+4. 启动新节点，让它通过 `join_seeds` 自动入群
+
 ### 1. 准备配置
 
-以 [monitor.example.yaml](monitor.example.yaml) 为模板，为每台 VPS 准备一份 `/etc/vps-monitor/monitor.yaml`。
+你可以直接手工维护 [monitor.example.yaml](monitor.example.yaml)，也可以更推荐地使用上面的 `cluster.inventory.yaml` 生成每台 VPS 的 `/etc/vps-monitor/monitor.yaml`。
 
-必须按真实环境修改：
+动态模式推荐至少按真实环境修改：
 
 - `cluster.node_id`
+- `cluster.api_addr`
+- `cluster.display_name`
 - `cluster.raft_addr`
 - `network.public_ipv4`
-- `cluster.peers`
+- `cluster.bootstrap` 或 `cluster.join_seeds`
+- `cluster.internal_token_env`
 - `checks.services`
 - `checks.docker_checks`
 - `cloudflare.*`
 - `alerts.*`
 
-说明：
+动态模式说明：
+
+- `cluster.peers` 为空时即进入动态模式
+- 首个节点设置 `cluster.bootstrap: true`
+- 其它节点设置 `cluster.join_seeds`
+- 动态模式强制要求内部 token；运行前必须在环境变量里提供 `MONITOR_INTERNAL_TOKEN`（或你自定义的 env 名）
+- `cluster.role` 可选，默认 `voter`
+- `cluster.display_name`、`cluster.priority`、`cluster.ingress_candidate` 会直接进入运行时成员目录
+- 管理后台的 “Cluster Membership” 面板可以查看当前角色、leader、健康概况，并执行升为 `voter`、降为 `nonvoter`、移除节点
+
+如果你继续使用静态兼容模式，则还需要维护：
+
+- `cluster.peers`
+
+静态模式说明：
 
 - `cluster.peers` 需要在三台机器上保持一致，并且必须包含三台节点的 `node_id / api_addr / raft_addr / public_ipv4`
 - `cluster.raft_bind_addr` 是可选字段；未设置时默认回退到 `cluster.raft_addr`。如果节点在 NAT 后面，或者想让 Raft 监听 `0.0.0.0:7000` 但对外广播另一地址，就把 bind 写在这里
@@ -209,6 +265,14 @@ systemctl enable vps-monitor
 
 ### 7. 启动顺序
 
+动态模式：
+
+1. 先启动 inventory 里第一台节点（渲染结果会带 `cluster.bootstrap: true`）
+2. 再启动其它节点；它们会循环请求 `join_seeds`，直到 leader 接受加入
+3. 之后如果要加第四台、第五台，直接启动新节点即可，老节点会自动在 `/api/v1/cluster` 和 `/admin` 里看到它
+
+静态模式：
+
 Raft 默认使用 `cluster.peers` 里的第一台节点做初始 bootstrap，所以建议按顺序启动：
 
 1. `node-a`
@@ -259,7 +323,9 @@ journalctl -u vps-monitor -n 100 --no-pager
 
 ## 说明
 
-- Raft bootstrap 逻辑默认使用 `cluster.peers` 数组里的第一台作为初始 bootstrap 节点
+- 动态模式下，节点无本地 Raft 状态且配置了 `join_seeds` 时，会在后台自动向 seed 节点发起 join，成功后再进入采集/探测循环
+- 动态模式下，运行时节点真相来源是复制到全员的成员目录，而不是本地 `cluster.peers`
+- 静态模式仍然可用；这时 bootstrap 逻辑默认使用 `cluster.peers` 数组里的第一台作为初始 bootstrap 节点
 - 观察数据通过 leader 复制，因此初次启动的前几轮页面会看到 `awaiting cluster data`
 - `checks.services` 使用 `systemctl is-active`
 - `checks.docker_checks` 使用 `docker inspect --format {{.State.Status}}`
@@ -269,7 +335,9 @@ journalctl -u vps-monitor -n 100 --no-pager
 
 ### 内部端点保护
 
-当服务运行在反向代理（如 Nginx）后面时，必须配置内部通信 token，否则 `/internal/v1/*` 端点的 IP 校验会被绕过。
+动态成员模式要求必须配置内部通信 token；没有 token 时，配置加载会直接失败。
+
+即使在静态模式下，只要服务运行在反向代理（如 Nginx）后面，也强烈建议配置内部通信 token，否则 `/internal/v1/*` 端点的 IP 校验会被绕过。
 
 在每台节点的环境变量中设置相同的 token：
 
@@ -286,28 +354,4 @@ cluster:
   internal_token_env: "MY_CUSTOM_TOKEN_ENV"
 ```
 
-如果不配置 token，服务回退到基于 IP 的访问控制（仅适用于无反向代理的场景）。
-
-## 发布到 GitHub
-
-如果要让我直接帮你发布到 GitHub，你至少需要提供这些信息：
-
-- 目标 GitHub 仓库地址
-  - 例如 `https://github.com/<user>/<repo>.git`
-  - 或者明确说“帮我新建 `<repo>` 这个仓库”
-- 你希望仓库放在个人账号还是组织下
-- 认证方式
-  - 已登录的 `gh`
-  - 或者可用的 GitHub token
-  - 或者你自己先在本机配好 `git`/`gh` 凭据
-- 是否需要我顺手做第一次提交
-  - 提交信息比如 `Initial commit`
-- 仓库可见性
-  - `public` 还是 `private`
-
-如果你只是想让我推送现有目录，最省事的方式是你先准备好：
-
-1. 一个空仓库
-2. 本机已经能正常 `git push`
-
-然后把仓库 URL 发我，我就可以继续做本地 `git init`、提交、绑定 remote、推送。
+静态模式下如果不配置 token，服务会回退到基于 IP 的访问控制（仅适用于无反向代理的场景）。动态 auto-join 不支持这种回退。

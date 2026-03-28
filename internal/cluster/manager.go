@@ -26,6 +26,7 @@ type Manager struct {
 	logger            *slog.Logger
 	leaderTransitions chan bool
 	isLeader          atomic.Bool
+	hasState          bool
 	closers           []io.Closer
 }
 
@@ -83,12 +84,20 @@ func NewManager(cfg *config.Config, st *store.Store, logger *slog.Logger) (*Mana
 	if err != nil {
 		return nil, fmt.Errorf("check raft state: %w", err)
 	}
+	manager.hasState = hasState
 	if !hasState && manager.shouldBootstrap() {
 		servers := make([]raft.Server, 0, len(cfg.Cluster.Peers))
-		for _, peer := range cfg.Cluster.Peers {
+		if cfg.UsesStaticPeers() {
+			for _, peer := range cfg.Cluster.Peers {
+				servers = append(servers, raft.Server{
+					ID:      raft.ServerID(peer.NodeID),
+					Address: raft.ServerAddress(peer.RaftAddr),
+				})
+			}
+		} else {
 			servers = append(servers, raft.Server{
-				ID:      raft.ServerID(peer.NodeID),
-				Address: raft.ServerAddress(peer.RaftAddr),
+				ID:      raft.ServerID(cfg.Cluster.NodeID),
+				Address: raft.ServerAddress(cfg.Cluster.RaftAddr),
 			})
 		}
 		if err := nodeRaft.BootstrapCluster(raft.Configuration{Servers: servers}).Error(); err != nil && err != raft.ErrCantBootstrap {
@@ -113,31 +122,17 @@ func (m *Manager) watchLeadership() {
 }
 
 func (m *Manager) shouldBootstrap() bool {
+	if m.cfg.UsesDynamicMembership() {
+		return m.cfg.Cluster.Bootstrap
+	}
 	if len(m.cfg.Cluster.Peers) == 0 {
-		return true
+		return false
 	}
 	return m.cfg.Cluster.Peers[0].NodeID == m.cfg.Cluster.NodeID
 }
 
 func (m *Manager) IsLeader() bool {
 	return m.isLeader.Load()
-}
-
-func (m *Manager) LeaderID() string {
-	leaderAddr := string(m.raft.Leader())
-	if leaderAddr == "" {
-		return ""
-	}
-	for _, peer := range m.cfg.Cluster.Peers {
-		if peer.RaftAddr == leaderAddr {
-			return peer.NodeID
-		}
-	}
-	return ""
-}
-
-func (m *Manager) LeaderAPIAddr() string {
-	return m.cfg.LeaderAPIAddr(m.LeaderID())
 }
 
 func (m *Manager) Apply(ctx context.Context, cmdType string, payload any) (any, error) {

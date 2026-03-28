@@ -58,12 +58,20 @@ func (e *Engine) tick(ctx context.Context) {
 		return
 	}
 	now := time.Now().UTC()
+	if err := e.cluster.EnsureMemberDirectorySeeded(ctx, now); err != nil {
+		e.logger.Error("seed cluster members failed", "error", err)
+	}
 	if err := e.ensureMonitorChecksSeeded(ctx, now); err != nil {
 		e.logger.Error("seed runtime monitor checks failed", "error", err)
 	}
-	for _, peer := range e.cfg.Cluster.Peers {
-		if err := e.evaluateNode(ctx, peer.NodeID, now); err != nil {
-			e.logger.Error("evaluate node failed", "node_id", peer.NodeID, "error", err)
+	members, err := e.cluster.ActiveMembers(ctx)
+	if err != nil {
+		e.logger.Error("list cluster members failed", "error", err)
+		return
+	}
+	for _, member := range members {
+		if err := e.evaluateNode(ctx, member.NodeID, now); err != nil {
+			e.logger.Error("evaluate node failed", "node_id", member.NodeID, "error", err)
 		}
 	}
 	if err := e.syncIngress(ctx, now); err != nil {
@@ -280,9 +288,13 @@ func failingServices(services []model.ServiceCheck) []string {
 }
 
 func (e *Engine) remotePeerCount() int {
+	members, err := e.cluster.ActiveMembers(context.Background())
+	if err != nil {
+		return 0
+	}
 	count := 0
-	for _, peer := range e.cfg.Cluster.Peers {
-		if peer.NodeID != e.cfg.Cluster.NodeID {
+	for _, member := range members {
+		if member.NodeID != e.cfg.Cluster.NodeID {
 			count++
 		}
 	}
@@ -475,7 +487,11 @@ func (e *Engine) syncIngress(ctx context.Context, now time.Time) error {
 		return err
 	}
 
-	targetPeer, ok := selectIngressTargetPeer(e.cfg, states, current)
+	members, err := e.cluster.ActiveMembers(ctx)
+	if err != nil {
+		return err
+	}
+	targetPeer, ok := selectIngressTargetPeer(e.cfg.Cluster.NodeID, members, states, current)
 	if !ok {
 		return nil
 	}
@@ -549,16 +565,20 @@ func (e *Engine) syncIngress(ctx context.Context, now time.Time) error {
 
 type ingressTargetCandidate struct {
 	state model.NodeState
-	peer  config.ClusterPeer
+	peer  model.ClusterMember
 }
 
-func selectIngressTargetPeer(cfg *config.Config, states []model.NodeState, current *model.IngressState) (config.ClusterPeer, bool) {
+func selectIngressTargetPeer(selfNodeID string, members []model.ClusterMember, states []model.NodeState, current *model.IngressState) (model.ClusterMember, bool) {
+	memberMap := make(map[string]model.ClusterMember, len(members))
+	for _, member := range members {
+		memberMap[member.NodeID] = member
+	}
 	eligible := make([]ingressTargetCandidate, 0, len(states))
 	for _, state := range states {
-		if !isIngressStateEligible(cfg, state) {
+		if !isIngressStateEligible(selfNodeID, state) {
 			continue
 		}
-		peer, ok := cfg.PeerByID(state.NodeID)
+		peer, ok := memberMap[state.NodeID]
 		if !ok || !peer.IsIngressCandidate() {
 			continue
 		}
@@ -568,7 +588,7 @@ func selectIngressTargetPeer(cfg *config.Config, states []model.NodeState, curre
 		})
 	}
 	if len(eligible) == 0 {
-		return config.ClusterPeer{}, false
+		return model.ClusterMember{}, false
 	}
 
 	slices.SortFunc(eligible, func(a, b ingressTargetCandidate) int {
@@ -587,9 +607,9 @@ func selectIngressTargetPeer(cfg *config.Config, states []model.NodeState, curre
 	return eligible[0].peer, true
 }
 
-func isIngressStateEligible(cfg *config.Config, state model.NodeState) bool {
+func isIngressStateEligible(selfNodeID string, state model.NodeState) bool {
 	if state.Status != model.StatusHealthy && (state.Status != model.StatusDegraded || state.RuleKey == "availability") {
 		return false
 	}
-	return state.LastProbeSummary.Reachable || state.NodeID == cfg.Cluster.NodeID
+	return state.LastProbeSummary.Reachable || state.NodeID == selfNodeID
 }

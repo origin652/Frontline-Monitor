@@ -56,7 +56,7 @@ func main() {
 
 	submitter := cluster.NewSubmitter(clusterManager, cfg)
 	collector := monitor.NewCollector(cfg, sqliteStore, submitter, logger)
-	prober := monitor.NewProber(cfg, sqliteStore, submitter, logger)
+	prober := monitor.NewProber(cfg, clusterManager, sqliteStore, submitter, logger)
 	notifiers := notify.Build(cfg, logger)
 	engineLoop := engine.New(cfg, sqliteStore, clusterManager, cloudflare.New(cfg), notifiers, logger)
 	webServer, err := web.New(cfg, sqliteStore, clusterManager, submitter, notifiers, logger)
@@ -74,11 +74,6 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	go collector.Run(ctx, 15*time.Second)
-	go prober.Run(ctx, 15*time.Second)
-	go engineLoop.Run(ctx, 15*time.Second)
-	go emitBootstrapEvent(ctx, cfg, clusterManager, logger)
-
 	go func() {
 		logger.Info("http server listening", "addr", cfg.Network.ListenAddr, "node_id", cfg.Cluster.NodeID)
 		var serveErr error
@@ -92,6 +87,21 @@ func main() {
 			stop()
 		}
 	}()
+
+	if clusterManager.NeedsJoin() {
+		logger.Info("dynamic membership join required", "node_id", cfg.Cluster.NodeID, "join_seeds", cfg.NormalizedJoinSeeds())
+		if err := clusterManager.AutoJoin(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			logger.Error("automatic cluster join failed", "error", err)
+			stop()
+		}
+	}
+
+	if ctx.Err() == nil {
+		go collector.Run(ctx, 15*time.Second)
+		go prober.Run(ctx, 15*time.Second)
+		go engineLoop.Run(ctx, 15*time.Second)
+		go emitBootstrapEvent(ctx, cfg, clusterManager, logger)
+	}
 
 	<-ctx.Done()
 	logger.Info("shutdown requested")

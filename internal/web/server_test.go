@@ -110,6 +110,32 @@ func TestAdminBootstrapChecksAndRedaction(t *testing.T) {
 		t.Fatalf("expected admin session after bootstrap, got %+v", meta)
 	}
 
+	status, members, _ := requestJSONArray(t, ts.Client(), http.MethodGet, ts.URL+"/api/v1/admin/members", nil, cookie)
+	if status != http.StatusOK {
+		t.Fatalf("list members status = %d", status)
+	}
+	if len(members) != 1 {
+		t.Fatalf("expected 1 member, got %d", len(members))
+	}
+	if got := members[0]["node_id"]; got != "node-a" {
+		t.Fatalf("expected member node_id node-a, got %v", got)
+	}
+	if got := members[0]["current_role"]; got != "voter" {
+		t.Fatalf("expected current_role voter, got %v", got)
+	}
+
+	status, _, _ = requestJSON(t, ts.Client(), http.MethodPut, ts.URL+"/api/v1/admin/members/node-a/role", map[string]any{
+		"role": "nonvoter",
+	}, cookie)
+	if status != http.StatusConflict {
+		t.Fatalf("demote last voter status = %d, want %d", status, http.StatusConflict)
+	}
+
+	status, _, _ = requestJSON(t, ts.Client(), http.MethodDelete, ts.URL+"/api/v1/admin/members/node-a", nil, cookie)
+	if status != http.StatusConflict {
+		t.Fatalf("remove last voter status = %d, want %d", status, http.StatusConflict)
+	}
+
 	status, _, _ = requestJSON(t, ts.Client(), http.MethodPut, ts.URL+"/api/v1/admin/nodes/node-a", map[string]any{
 		"display_name": "Primary Shanghai",
 	}, cookie)
