@@ -83,6 +83,7 @@ type ProbeObservation struct {
 type ProbeSummary struct {
 	SuccessfulPeers int      `json:"successful_peers"`
 	TotalPeers      int      `json:"total_peers"`
+	ExpectedPeers   int      `json:"expected_peers,omitempty"`
 	Reachable       bool     `json:"reachable"`
 	LastSources     []string `json:"last_sources"`
 }

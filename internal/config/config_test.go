@@ -131,6 +131,20 @@ func TestLoopIntervalDefaultAndOverride(t *testing.T) {
 	}
 }
 
+func TestProbeObserversPerTargetDefaultAndOverride(t *testing.T) {
+	t.Parallel()
+
+	cfg := &Config{}
+	if got := cfg.ProbeObserversPerTarget(); got != 0 {
+		t.Fatalf("ProbeObserversPerTarget() default = %d, want 0", got)
+	}
+
+	cfg.Runtime.ProbeObserversPerTarget = 3
+	if got := cfg.ProbeObserversPerTarget(); got != 3 {
+		t.Fatalf("ProbeObserversPerTarget() override = %d, want 3", got)
+	}
+}
+
 func TestValidateRejectsInvalidLoopInterval(t *testing.T) {
 	t.Setenv("MONITOR_INTERNAL_TOKEN", "secret")
 	cfg := &Config{
@@ -157,5 +171,34 @@ func TestValidateRejectsInvalidLoopInterval(t *testing.T) {
 
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("Validate() error = nil, want invalid runtime.loop_interval")
+	}
+}
+
+func TestValidateRejectsNegativeProbeObserversPerTarget(t *testing.T) {
+	t.Setenv("MONITOR_INTERNAL_TOKEN", "secret")
+	cfg := &Config{
+		Cluster: ClusterConfig{
+			NodeID:    "node-a",
+			APIAddr:   "10.0.0.11:8443",
+			RaftAddr:  "10.0.0.11:7000",
+			JoinSeeds: []string{"10.0.0.12:8443"},
+		},
+		Network: NetworkConfig{
+			ListenAddr:      ":8443",
+			PublicIPv4:      "203.0.113.11",
+			PublicHTTPSPort: 443,
+		},
+		Runtime: RuntimeConfig{
+			ProbeObserversPerTarget: -1,
+		},
+		Storage: StorageConfig{
+			DataDir:    "/tmp/data",
+			SQLitePath: "/tmp/data/monitor.db",
+			RaftDir:    "/tmp/data/raft",
+		},
+	}
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want invalid runtime.probe_observers_per_target")
 	}
 }

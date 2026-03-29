@@ -84,7 +84,8 @@ type HTTPCheck struct {
 }
 
 type RuntimeConfig struct {
-	LoopInterval string `yaml:"loop_interval,omitempty"`
+	LoopInterval            string `yaml:"loop_interval,omitempty"`
+	ProbeObserversPerTarget int    `yaml:"probe_observers_per_target,omitempty"`
 }
 
 type Thresholds struct {
@@ -216,6 +217,9 @@ func (c *Config) validate(requireRuntimeSecrets bool) error {
 		if err != nil || parsed <= 0 {
 			problems = append(problems, "runtime.loop_interval must be a positive duration")
 		}
+	}
+	if c.Runtime.ProbeObserversPerTarget < 0 {
+		problems = append(problems, "runtime.probe_observers_per_target must be zero or a positive integer")
 	}
 	if c.UsesStaticPeers() {
 		nodeIDs := map[string]struct{}{}
@@ -354,6 +358,13 @@ func (c *Config) WebhookTimeout() time.Duration {
 
 func (c *Config) LoopInterval() time.Duration {
 	return parsePositiveDurationOr(c.Runtime.LoopInterval, 15*time.Second)
+}
+
+func (c *Config) ProbeObserversPerTarget() int {
+	if c.Runtime.ProbeObserversPerTarget < 0 {
+		return 0
+	}
+	return c.Runtime.ProbeObserversPerTarget
 }
 
 func parseDurationOr(raw string, fallback time.Duration) time.Duration {

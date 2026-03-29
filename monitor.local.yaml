@@ -28,6 +28,8 @@ checks:
 runtime:
   # Optional. Omit this section to use the default 15s loop interval.
   loop_interval: 15s
+  # Keep local single-node smoke tests on full-mesh semantics.
+  probe_observers_per_target: 0
 
 thresholds:
   cpu_warn: 80

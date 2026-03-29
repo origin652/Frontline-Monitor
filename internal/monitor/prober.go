@@ -17,17 +17,22 @@ import (
 type Prober struct {
 	cfg     *config.Config
 	cluster *cluster.Manager
-	checks  MonitorCheckSource
+	source  ProbeRuntimeSource
 	sink    ObservationSink
 	logger  *slog.Logger
 	client  *http.Client
 }
 
-func NewProber(cfg *config.Config, clusterManager *cluster.Manager, checks MonitorCheckSource, sink ObservationSink, logger *slog.Logger) *Prober {
+type ProbeRuntimeSource interface {
+	MonitorCheckSource
+	ListNodeStates(ctx context.Context) ([]model.NodeState, error)
+}
+
+func NewProber(cfg *config.Config, clusterManager *cluster.Manager, source ProbeRuntimeSource, sink ObservationSink, logger *slog.Logger) *Prober {
 	return &Prober{
 		cfg:     cfg,
 		cluster: clusterManager,
-		checks:  checks,
+		source:  source,
 		sink:    sink,
 		logger:  logger,
 		client: &http.Client{
@@ -52,22 +57,37 @@ func (p *Prober) Run(ctx context.Context, interval time.Duration) {
 }
 
 func (p *Prober) probeOnce(ctx context.Context) {
-	peers := p.remotePeers(ctx)
-	if len(peers) == 0 {
+	members, err := p.cluster.ActiveMembers(ctx)
+	if err != nil {
+		p.logger.Error("list cluster members for prober failed", "error", err)
+		return
+	}
+
+	states := []model.NodeState{}
+	if p.source != nil {
+		states, err = p.source.ListNodeStates(ctx)
+		if err != nil {
+			p.logger.Warn("load node states for prober failed, falling back to empty observer snapshot", "error", err)
+		}
+	}
+
+	assignments := BuildObserverAssignments(members, states, p.cfg.ProbeObserversPerTarget())
+	targets := ProbeTargetsForObserver(p.cfg.Cluster.NodeID, members, assignments)
+	if len(targets) == 0 {
 		p.logger.Debug("skip prober tick", "reason", errNoPeers)
 		return
 	}
-	runtimeChecks := loadMonitorChecks(ctx, p.checks, p.cfg, p.logger)
+	runtimeChecks := loadMonitorChecks(ctx, p.source, p.cfg, p.logger)
 
-	for _, peer := range peers {
-		probe := p.probePeer(ctx, peer, runtimeChecks)
+	for _, target := range targets {
+		probe := p.probePeer(ctx, target, runtimeChecks)
 		if err := p.sink.SubmitProbe(ctx, probe); err != nil {
-			p.logger.Error("submit probe failed", "target", peer.NodeID, "error", err)
+			p.logger.Error("submit probe failed", "target", target.NodeID, "error", err)
 		}
 	}
 }
 
-func (p *Prober) probePeer(ctx context.Context, peer config.ClusterPeer, checks []model.MonitorCheck) model.ProbeObservation {
+func (p *Prober) probePeer(ctx context.Context, peer model.ClusterMember, checks []model.MonitorCheck) model.ProbeObservation {
 	now := time.Now().UTC()
 	ports := make([]model.PortResult, 0, len(checks)+2)
 	sshLatency, sshOK := p.readSSHBanner(peer.PublicIPv4)
@@ -110,30 +130,6 @@ func (p *Prober) probePeer(ctx context.Context, peer config.ClusterPeer, checks 
 		Ports:        ports,
 		HTTPChecks:   httpChecks,
 	}
-}
-
-func (p *Prober) remotePeers(ctx context.Context) []config.ClusterPeer {
-	members, err := p.cluster.ActiveMembers(ctx)
-	if err != nil {
-		p.logger.Error("list cluster members for prober failed", "error", err)
-		return nil
-	}
-	peers := make([]config.ClusterPeer, 0, len(members))
-	for _, member := range members {
-		if member.NodeID == p.cfg.Cluster.NodeID {
-			continue
-		}
-		peers = append(peers, config.ClusterPeer{
-			NodeID:           member.NodeID,
-			DisplayName:      member.DisplayName,
-			APIAddr:          member.APIAddr,
-			RaftAddr:         member.RaftAddr,
-			PublicIPv4:       member.PublicIPv4,
-			Priority:         member.Priority,
-			IngressCandidate: member.IngressCandidate,
-		})
-	}
-	return peers
 }
 
 func (p *Prober) probeTCP(host string, port int) model.PortResult {

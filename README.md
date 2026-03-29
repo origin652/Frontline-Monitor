@@ -2,7 +2,7 @@
 
 一个面向 3 台 VPS 的分布式监控探针服务：
 
-- 3 节点互探
+- 多节点互探（默认 full-mesh，可选稀疏观察者模式）
 - `hashicorp/raft` 自动选主
 - 动态成员目录 + seed auto-join
 - SQLite 本地物化视图
@@ -141,6 +141,11 @@ go run ./cmd/vps-monitor-render -inventory cluster.inventory.yaml -out build/con
   - 控制 collector、prober、leader engine 三个主循环的间隔
   - 不配置时默认 `15s`
   - 想进一步省资源，可以调成 `30s` 或 `60s`
+- `runtime.probe_observers_per_target`
+  - 控制每个目标节点由多少个观察节点执行互探
+  - `0` 或不配置时保持原来的 full-mesh 互探
+  - `>0` 时启用稀疏观察者模式，把探测 fan-out 从 `O(N^2)` 降到 `O(N*K)`
+  - 观察节点失去新鲜状态后，会在下一轮 leader 评估中自动被剔除并重分配
 
 动态模式说明：
 
@@ -334,6 +339,7 @@ journalctl -u vps-monitor -n 100 --no-pager
 - 动态模式下，运行时节点真相来源是复制到全员的成员目录，而不是本地 `cluster.peers`
 - 静态模式仍然可用；这时 bootstrap 逻辑默认使用 `cluster.peers` 数组里的第一台作为初始 bootstrap 节点
 - 观察数据通过 leader 复制，因此初次启动的前几轮页面会看到 `awaiting cluster data`
+- 稀疏观察者模式下，leader 会按稳定哈希为每个目标节点选择固定数量的观察节点；如果观察证据不足，节点会先进入 `degraded`，不会直接升级成 availability `critical`
 - `checks.services` 使用 `systemctl is-active`
 - `checks.docker_checks` 使用 `docker inspect --format {{.State.Status}}`
 - 对外写接口没有开放；公网只提供只读页面和只读 API

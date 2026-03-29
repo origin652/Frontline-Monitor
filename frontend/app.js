@@ -2102,7 +2102,7 @@
         <div class="trendline trendline--node">${sparkline(history)}</div>
         <div class="node-card__footer">
           <span>${countServiceIssues(node.services)} 项服务异常</span>
-          <span>${(summary.successful_peers || 0)} / ${(summary.total_peers || 0)} 个节点确认</span>
+          <span>${probeReachText(summary)}</span>
           <span>Load ${escapeHTML(loadLabel)}</span>
         </div>
       </article>
@@ -2829,7 +2829,7 @@
               ${renderObsidianInfoCard("Uptime", formatUptimeLong(state.uptime_s))}
               ${renderObsidianInfoCard("Leader", leaderLabel || "Electing")}
               ${renderObsidianInfoCard("Heartbeat", timeAgo(state.last_heartbeat_at))}
-              ${renderObsidianInfoCard("Peer Reach", (state.last_probe_summary.successful_peers || 0) + "/" + (state.last_probe_summary.total_peers || 0))}
+              ${renderObsidianInfoCard("Peer Reach", probeReachLabel(state.last_probe_summary))}
             </div>
           </article>
         </section>
@@ -3299,7 +3299,7 @@
           <span>${escapeHTML(statusLabel(node.status))}</span>
         </div>
         <div class="obs-node-row__metric">
-          <strong>${escapeHTML((summary.successful_peers || 0) + "/" + (summary.total_peers || 0))}</strong>
+          <strong>${escapeHTML(probeReachLabel(summary))}</strong>
           <span>Peer Reach</span>
         </div>
         <div class="obs-node-row__metric">
@@ -3577,7 +3577,7 @@
           "cpu " + formatPercent(node.cpu_pct),
           "memory " + formatPercent(node.mem_pct),
           "disk " + formatPercent(node.disk_pct),
-          "peers " + (probeSummary.successful_peers || 0) + "/" + (probeSummary.total_peers || 0)
+          "peers " + probeReachLabel(probeSummary)
         ].join(" ")
       });
     });
@@ -3737,10 +3737,38 @@
 
   function nodeVisibilityPct(state) {
     const summary = state && state.last_probe_summary ? state.last_probe_summary : {};
-    if (summary.total_peers > 0) {
-      return Math.max(0, Math.min(100, Math.round((summary.successful_peers / summary.total_peers) * 100)));
+    const denominator = probeReachDenominator(summary);
+    if (denominator > 0) {
+      return Math.max(0, Math.min(100, Math.round((probeReachSuccessCount(summary) / denominator) * 100)));
     }
     return normalizeStatus(state && state.status) === "healthy" ? 100 : 0;
+  }
+
+  function probeReachSuccessCount(summary) {
+    const parsed = Number(summary && summary.successful_peers);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+  }
+
+  function probeReachDenominator(summary) {
+    const expected = Number(summary && summary.expected_peers);
+    if (Number.isFinite(expected) && expected > 0) {
+      return expected;
+    }
+    const total = Number(summary && summary.total_peers);
+    if (Number.isFinite(total) && total > 0) {
+      return total;
+    }
+    return 0;
+  }
+
+  function probeReachLabel(summary) {
+    return probeReachSuccessCount(summary) + "/" + probeReachDenominator(summary);
+  }
+
+  function probeReachText(summary) {
+    const expected = Number(summary && summary.expected_peers);
+    const suffix = Number.isFinite(expected) && expected > 0 ? " 个观察节点确认" : " 个节点确认";
+    return probeReachSuccessCount(summary) + " / " + probeReachDenominator(summary) + suffix;
   }
 
   function nodeRoleLabel(snapshot, nodeID) {

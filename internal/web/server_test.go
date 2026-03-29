@@ -229,6 +229,26 @@ func TestAdminBootstrapChecksAndRedaction(t *testing.T) {
 		t.Fatalf("expected visible desired_ip, got %v", got)
 	}
 
+	_, err = manager.Apply(context.Background(), cluster.CommandNodeState, model.NodeState{
+		NodeID:          "node-a",
+		Status:          model.StatusHealthy,
+		Reason:          "fresh heartbeat and observer reachability confirmed",
+		RuleKey:         "healthy",
+		LastHeartbeatAt: time.Now().UTC(),
+		LastProbeSummary: model.ProbeSummary{
+			SuccessfulPeers: 1,
+			TotalPeers:      1,
+			ExpectedPeers:   3,
+			Reachable:       true,
+			LastSources:     []string{"node-b"},
+		},
+		ReplicatedFresh: true,
+		LastEvaluatedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("apply node state: %v", err)
+	}
+
 	status, clusterPayload, _ := requestJSON(t, ts.Client(), http.MethodGet, ts.URL+"/api/v1/cluster", nil, "")
 	if status != http.StatusOK {
 		t.Fatalf("cluster status = %d", status)
@@ -246,6 +266,29 @@ func TestAdminBootstrapChecksAndRedaction(t *testing.T) {
 	}
 	if got := firstNode["node_name"]; got != "Primary Shanghai" {
 		t.Fatalf("expected node_name on cluster node, got %v", got)
+	}
+	summary, ok := firstNode["last_probe_summary"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected last_probe_summary, got %#v", firstNode["last_probe_summary"])
+	}
+	if got := summary["expected_peers"]; got != float64(3) {
+		t.Fatalf("expected expected_peers 3, got %v", got)
+	}
+
+	status, nodeDetail, _ := requestJSON(t, ts.Client(), http.MethodGet, ts.URL+"/api/v1/nodes/node-a", nil, "")
+	if status != http.StatusOK {
+		t.Fatalf("node detail status = %d", status)
+	}
+	statePayload, ok := nodeDetail["state"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected state payload, got %#v", nodeDetail["state"])
+	}
+	summary, ok = statePayload["last_probe_summary"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected node detail last_probe_summary, got %#v", statePayload["last_probe_summary"])
+	}
+	if got := summary["expected_peers"]; got != float64(3) {
+		t.Fatalf("expected node detail expected_peers 3, got %v", got)
 	}
 
 	status, _, _ = requestJSON(t, ts.Client(), http.MethodPost, ts.URL+"/api/v1/admin/logout", map[string]any{}, cookie)

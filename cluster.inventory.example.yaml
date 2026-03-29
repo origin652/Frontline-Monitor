@@ -38,6 +38,9 @@ shared:
   runtime:
     # Optional. If omitted, rendered configs use the default 15s loop interval.
     loop_interval: 15s
+    # Optional. 0 or omitted keeps full-mesh probing. Set >0 to probe each
+    # target from only N observer nodes.
+    probe_observers_per_target: 0
 
   thresholds:
     cpu_warn: 80

@@ -14,6 +14,7 @@ import (
 	"vps-monitor/internal/cluster"
 	"vps-monitor/internal/config"
 	"vps-monitor/internal/model"
+	"vps-monitor/internal/monitor"
 	"vps-monitor/internal/notify"
 	"vps-monitor/internal/store"
 )
@@ -69,8 +70,15 @@ func (e *Engine) tick(ctx context.Context) {
 		e.logger.Error("list cluster members failed", "error", err)
 		return
 	}
+	states, err := e.store.ListNodeStates(ctx)
+	if err != nil {
+		e.logger.Error("list node states failed", "error", err)
+		return
+	}
+	assignments := monitor.BuildObserverAssignments(members, states, e.cfg.ProbeObserversPerTarget())
+	singleNodeMode := len(members) <= 1
 	for _, member := range members {
-		if err := e.evaluateNode(ctx, member.NodeID, now); err != nil {
+		if err := e.evaluateNode(ctx, member.NodeID, assignments[member.NodeID], singleNodeMode, now); err != nil {
 			e.logger.Error("evaluate node failed", "node_id", member.NodeID, "error", err)
 		}
 	}
@@ -110,7 +118,7 @@ func (e *Engine) ensureMonitorChecksSeeded(ctx context.Context, now time.Time) e
 	return nil
 }
 
-func (e *Engine) evaluateNode(ctx context.Context, nodeID string, now time.Time) error {
+func (e *Engine) evaluateNode(ctx context.Context, nodeID string, expectedObservers []model.ClusterMember, singleNodeMode bool, now time.Time) error {
 	prev, err := e.store.GetNodeState(ctx, nodeID)
 	if err != nil {
 		return err
@@ -119,11 +127,12 @@ func (e *Engine) evaluateNode(ctx context.Context, nodeID string, now time.Time)
 	if err != nil {
 		return err
 	}
-	probes, err := e.store.RecentProbesForTarget(ctx, nodeID, now.Add(-45*time.Second), 12)
+	probes, err := e.store.RecentProbesForTarget(ctx, nodeID, now.Add(-45*time.Second), probeSampleLimit(len(expectedObservers), e.cfg.LoopInterval()))
 	if err != nil {
 		return err
 	}
-	next := e.assessNode(nodeID, heartbeat, probes, prev, now)
+	probes = filterProbesForObservers(probes, expectedObservers)
+	next := e.assessNode(nodeID, heartbeat, probes, prev, now, len(expectedObservers), singleNodeMode)
 	if prev == nil || stateChanged(*prev, next) {
 		if _, err := e.cluster.Apply(ctx, cluster.CommandNodeState, next); err != nil {
 			return err
@@ -135,7 +144,7 @@ func (e *Engine) evaluateNode(ctx context.Context, nodeID string, now time.Time)
 	return e.reconcileIncidents(ctx, next, prev, now)
 }
 
-func (e *Engine) assessNode(nodeID string, heartbeat *model.NodeHeartbeat, probes []model.ProbeObservation, prev *model.NodeState, now time.Time) model.NodeState {
+func (e *Engine) assessNode(nodeID string, heartbeat *model.NodeHeartbeat, probes []model.ProbeObservation, prev *model.NodeState, now time.Time, expectedPeers int, singleNodeMode bool) model.NodeState {
 	next := model.NodeState{
 		NodeID:          nodeID,
 		Status:          model.StatusUnknown,
@@ -176,6 +185,7 @@ func (e *Engine) assessNode(nodeID string, heartbeat *model.NodeHeartbeat, probe
 	next.LastProbeSummary = model.ProbeSummary{
 		SuccessfulPeers: len(successSources),
 		TotalPeers:      len(allSources),
+		ExpectedPeers:   expectedPeers,
 		Reachable:       len(successSources) > 0,
 		LastSources:     lastSources,
 	}
@@ -191,22 +201,29 @@ func (e *Engine) assessNode(nodeID string, heartbeat *model.NodeHeartbeat, probe
 	heartbeatAge := now.Sub(heartbeat.CollectedAt)
 	next.ReplicatedFresh = heartbeatAge <= 45*time.Second
 	evidence = append(evidence, fmt.Sprintf("heartbeat age %s", heartbeatAge.Round(time.Second)))
-	if len(allSources) > 0 {
+	if expectedPeers > 0 {
+		evidence = append(evidence, fmt.Sprintf("%d/%d expected observers reported this node", len(allSources), expectedPeers))
+		evidence = append(evidence, fmt.Sprintf("%d/%d expected observers confirmed reachability", len(successSources), expectedPeers))
+	} else if len(allSources) > 0 {
 		evidence = append(evidence, fmt.Sprintf("%d/%d peers still reach node", len(successSources), len(allSources)))
 	} else {
-		evidence = append(evidence, "no fresh peer probes in evaluation window")
+		evidence = append(evidence, "no fresh observer probes in evaluation window")
 	}
 
 	serviceFailures := failingServices(heartbeat.Services)
-	singleNodeMode := e.remotePeerCount() == 0
+	negativeEvidenceThreshold := requiredNegativeEvidenceReports(expectedPeers)
 	switch {
-	case heartbeatAge > 45*time.Second && len(allSources) >= 2 && len(successSources) == 0:
-		next.Status = model.StatusCritical
-		next.Reason = "heartbeat stale and no peers can reach the node"
-		next.RuleKey = "availability"
 	case heartbeatAge > 45*time.Second && len(successSources) > 0:
 		next.Status = model.StatusDegraded
 		next.Reason = "node is reachable but agent heartbeat is stale"
+		next.RuleKey = "agent-stale"
+	case heartbeatAge > 45*time.Second && negativeEvidenceThreshold > 0 && len(allSources) >= negativeEvidenceThreshold && len(successSources) == 0:
+		next.Status = model.StatusCritical
+		next.Reason = "heartbeat stale and no peers can reach the node"
+		next.RuleKey = "availability"
+	case heartbeatAge > 45*time.Second:
+		next.Status = model.StatusDegraded
+		next.Reason = "heartbeat stale with insufficient observer evidence"
 		next.RuleKey = "agent-stale"
 	case heartbeat.DiskPct >= e.cfg.Thresholds.DiskCrit || heartbeat.MemPct >= e.cfg.Thresholds.MemCrit:
 		next.Status = model.StatusCritical
@@ -227,15 +244,15 @@ func (e *Engine) assessNode(nodeID string, heartbeat *model.NodeHeartbeat, probe
 		next.RuleKey = "healthy-local"
 	case len(allSources) == 0:
 		next.Status = model.StatusDegraded
-		next.Reason = "missing peer visibility confirmation"
+		next.Reason = "missing observer visibility confirmation"
 		next.RuleKey = "visibility"
 	case len(successSources) == 0:
 		next.Status = model.StatusDegraded
-		next.Reason = "peers report the public surface unreachable"
+		next.Reason = "observers report the public surface unreachable"
 		next.RuleKey = "visibility"
 	default:
 		next.Status = model.StatusHealthy
-		next.Reason = "fresh heartbeat and peer reachability confirmed"
+		next.Reason = "fresh heartbeat and observer reachability confirmed"
 		next.RuleKey = "healthy"
 	}
 
@@ -274,7 +291,8 @@ func stateChanged(prev model.NodeState, next model.NodeState) bool {
 		prev.MemPct != next.MemPct ||
 		prev.DiskPct != next.DiskPct ||
 		prev.ReplicatedFresh != next.ReplicatedFresh ||
-		prev.RuleKey != next.RuleKey
+		prev.RuleKey != next.RuleKey ||
+		probeSummaryChanged(prev.LastProbeSummary, next.LastProbeSummary)
 }
 
 func failingServices(services []model.ServiceCheck) []string {
@@ -287,18 +305,71 @@ func failingServices(services []model.ServiceCheck) []string {
 	return names
 }
 
-func (e *Engine) remotePeerCount() int {
-	members, err := e.cluster.ActiveMembers(context.Background())
-	if err != nil {
-		return 0
+func probeSummaryChanged(prev model.ProbeSummary, next model.ProbeSummary) bool {
+	if prev.SuccessfulPeers != next.SuccessfulPeers ||
+		prev.TotalPeers != next.TotalPeers ||
+		prev.ExpectedPeers != next.ExpectedPeers ||
+		prev.Reachable != next.Reachable ||
+		len(prev.LastSources) != len(next.LastSources) {
+		return true
 	}
-	count := 0
-	for _, member := range members {
-		if member.NodeID != e.cfg.Cluster.NodeID {
-			count++
+	for i := range prev.LastSources {
+		if prev.LastSources[i] != next.LastSources[i] {
+			return true
 		}
 	}
-	return count
+	return false
+}
+
+func filterProbesForObservers(probes []model.ProbeObservation, expectedObservers []model.ClusterMember) []model.ProbeObservation {
+	if len(expectedObservers) == 0 {
+		return nil
+	}
+	allowed := make(map[string]struct{}, len(expectedObservers))
+	for _, observer := range expectedObservers {
+		allowed[observer.NodeID] = struct{}{}
+	}
+	filtered := make([]model.ProbeObservation, 0, len(probes))
+	for _, probe := range probes {
+		if _, ok := allowed[probe.SourceNodeID]; !ok {
+			continue
+		}
+		filtered = append(filtered, probe)
+	}
+	return filtered
+}
+
+func requiredNegativeEvidenceReports(expectedPeers int) int {
+	switch {
+	case expectedPeers <= 0:
+		return 0
+	case expectedPeers == 1:
+		return 1
+	default:
+		return 2
+	}
+}
+
+func probeSampleLimit(expectedPeers int, interval time.Duration) int {
+	if interval <= 0 {
+		interval = 15 * time.Second
+	}
+	samplesPerObserver := int((45 * time.Second) / interval)
+	if (45*time.Second)%interval != 0 {
+		samplesPerObserver++
+	}
+	samplesPerObserver++
+	if samplesPerObserver < 1 {
+		samplesPerObserver = 1
+	}
+	if expectedPeers < 1 {
+		expectedPeers = 1
+	}
+	limit := expectedPeers * samplesPerObserver
+	if limit < 12 {
+		return 12
+	}
+	return limit
 }
 
 func (e *Engine) recordStateChangeEvent(ctx context.Context, prev *model.NodeState, next model.NodeState) error {
