@@ -58,7 +58,10 @@ func NewTelegramNotifier(cfg *config.Config, logger *slog.Logger) *TelegramNotif
 func (n *TelegramNotifier) Name() string { return "telegram" }
 
 func (n *TelegramNotifier) Send(ctx context.Context, action string, incident model.Incident) (string, error) {
-	token := os.Getenv(n.cfg.Alerts.Telegram.BotTokenEnv)
+	token := strings.TrimSpace(n.cfg.Alerts.Telegram.BotToken)
+	if token == "" && n.cfg.Alerts.Telegram.BotTokenEnv != "" {
+		token = strings.TrimSpace(os.Getenv(n.cfg.Alerts.Telegram.BotTokenEnv))
+	}
 	if token == "" {
 		return "", fmt.Errorf("telegram bot token env %q is empty", n.cfg.Alerts.Telegram.BotTokenEnv)
 	}
@@ -99,14 +102,17 @@ func NewSMTPNotifier(cfg *config.Config, logger *slog.Logger) *SMTPNotifier {
 func (n *SMTPNotifier) Name() string { return "smtp" }
 
 func (n *SMTPNotifier) Send(ctx context.Context, action string, incident model.Incident) (string, error) {
-	password := os.Getenv(n.cfg.Alerts.SMTP.PasswordEnv)
-	if password == "" {
-		return "", fmt.Errorf("smtp password env %q is empty", n.cfg.Alerts.SMTP.PasswordEnv)
+	password := strings.TrimSpace(n.cfg.Alerts.SMTP.Password)
+	if password == "" && n.cfg.Alerts.SMTP.PasswordEnv != "" {
+		password = strings.TrimSpace(os.Getenv(n.cfg.Alerts.SMTP.PasswordEnv))
 	}
 	address := fmt.Sprintf("%s:%d", n.cfg.Alerts.SMTP.Host, n.cfg.Alerts.SMTP.Port)
 	subject := fmt.Sprintf("%s[%s] %s", defaultString(n.cfg.Alerts.SMTP.SubjectPrefix, "Monitor "), strings.ToUpper(action), incident.Summary)
 	body := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\n\r\n%s\r\n", n.cfg.Alerts.SMTP.From, strings.Join(n.cfg.Alerts.SMTP.To, ","), subject, renderAlertText(action, incident))
-	auth := smtp.PlainAuth("", n.cfg.Alerts.SMTP.Username, password, n.cfg.Alerts.SMTP.Host)
+	var auth smtp.Auth
+	if n.cfg.Alerts.SMTP.Username != "" || password != "" {
+		auth = smtp.PlainAuth("", n.cfg.Alerts.SMTP.Username, password, n.cfg.Alerts.SMTP.Host)
+	}
 
 	var err error
 	done := make(chan struct{})
@@ -149,7 +155,11 @@ func (n *WebhookNotifier) Send(ctx context.Context, action string, incident mode
 		},
 	}
 	url := n.cfg.Alerts.WeCom.WebhookURL
-	if secret := os.Getenv(n.cfg.Alerts.WeCom.SecretEnv); secret != "" {
+	secret := strings.TrimSpace(n.cfg.Alerts.WeCom.Secret)
+	if secret == "" && n.cfg.Alerts.WeCom.SecretEnv != "" {
+		secret = strings.TrimSpace(os.Getenv(n.cfg.Alerts.WeCom.SecretEnv))
+	}
+	if secret != "" {
 		ts := time.Now().UnixMilli()
 		signature := signWebhook(secret, ts)
 		if strings.Contains(url, "?") {

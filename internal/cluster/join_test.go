@@ -12,6 +12,7 @@ import (
 
 	"vps-monitor/internal/cluster"
 	"vps-monitor/internal/config"
+	"vps-monitor/internal/notify"
 	"vps-monitor/internal/store"
 	"vps-monitor/internal/web"
 )
@@ -33,7 +34,7 @@ func TestAutoJoinDynamicMembership(t *testing.T) {
 	defer shutdownManager(t, leaderManager)
 	waitForLeader(t, leaderManager)
 
-	leaderServer, err := web.New(leaderCfg, leaderStore, leaderManager, cluster.NewSubmitter(leaderManager, leaderCfg), nil, logger)
+	leaderServer, err := web.New(leaderCfg, leaderStore, leaderManager, cluster.NewSubmitter(leaderManager, leaderCfg), notify.NewResolver(leaderCfg, leaderStore, logger), logger)
 	if err != nil {
 		t.Fatalf("new leader web server: %v", err)
 	}

@@ -20,22 +20,22 @@ import (
 )
 
 type Server struct {
-	cfg       *config.Config
-	store     *store.Store
-	cluster   *cluster.Manager
-	submitter *cluster.Submitter
-	notifiers []notify.Notifier
-	logger    *slog.Logger
+	cfg           *config.Config
+	store         *store.Store
+	cluster       *cluster.Manager
+	submitter     *cluster.Submitter
+	alertResolver *notify.Resolver
+	logger        *slog.Logger
 }
 
-func New(cfg *config.Config, st *store.Store, cl *cluster.Manager, submitter *cluster.Submitter, notifiers []notify.Notifier, logger *slog.Logger) (*Server, error) {
+func New(cfg *config.Config, st *store.Store, cl *cluster.Manager, submitter *cluster.Submitter, alertResolver *notify.Resolver, logger *slog.Logger) (*Server, error) {
 	return &Server{
-		cfg:       cfg,
-		store:     st,
-		cluster:   cl,
-		submitter: submitter,
-		notifiers: notifiers,
-		logger:    logger,
+		cfg:           cfg,
+		store:         st,
+		cluster:       cl,
+		submitter:     submitter,
+		alertResolver: alertResolver,
+		logger:        logger,
 	}, nil
 }
 
@@ -62,6 +62,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/admin/logout", s.handleAdminLogout)
 	mux.HandleFunc("GET /api/v1/admin/me", s.handleAdminMe)
 	mux.HandleFunc("POST /api/v1/admin/password", s.handleAdminPassword)
+	mux.HandleFunc("GET /api/v1/admin/alerts", s.handleAdminAlerts)
+	mux.HandleFunc("PUT /api/v1/admin/alerts/{channel}", s.handleAdminAlertByChannel)
+	mux.HandleFunc("DELETE /api/v1/admin/alerts/{channel}", s.handleAdminAlertByChannel)
 	mux.HandleFunc("GET /api/v1/admin/checks", s.handleAdminChecks)
 	mux.HandleFunc("POST /api/v1/admin/checks", s.handleAdminChecks)
 	mux.HandleFunc("PUT /api/v1/admin/checks/{id}", s.handleAdminCheckByID)
@@ -134,7 +137,11 @@ func (s *Server) handleMetaAPI(w http.ResponseWriter, r *http.Request) {
 	isAdmin := s.isAdminRequest(r)
 	channels := []string{}
 	if isAdmin {
-		channels = s.enabledAlertChannels()
+		channels, err = s.enabledAlertChannels(r.Context())
+		if err != nil {
+			s.renderError(w, http.StatusInternalServerError, err)
+			return
+		}
 	}
 	leaderID := s.cluster.LeaderID()
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -279,10 +286,6 @@ func (s *Server) handleTestAlert(w http.ResponseWriter, r *http.Request) {
 		s.renderError(w, http.StatusUnauthorized, fmt.Errorf("admin login required"))
 		return
 	}
-	if len(s.notifiers) == 0 {
-		s.renderError(w, http.StatusBadRequest, fmt.Errorf("no alert channels are enabled"))
-		return
-	}
 	defer r.Body.Close()
 
 	var req testAlertRequest
@@ -291,9 +294,17 @@ func (s *Server) handleTestAlert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	notifiers := s.pickNotifiers(req.Channel)
+	notifiers, err := s.pickNotifiers(r.Context(), req.Channel)
+	if err != nil {
+		s.renderError(w, http.StatusInternalServerError, err)
+		return
+	}
 	if len(notifiers) == 0 {
-		s.renderError(w, http.StatusBadRequest, fmt.Errorf("requested channel is not enabled"))
+		message := "no alert channels are enabled"
+		if strings.TrimSpace(strings.ToLower(req.Channel)) != "" && strings.TrimSpace(strings.ToLower(req.Channel)) != "all" {
+			message = "requested channel is not enabled"
+		}
+		s.renderError(w, http.StatusBadRequest, fmt.Errorf(message))
 		return
 	}
 
@@ -419,18 +430,11 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	_ = json.NewEncoder(w).Encode(payload)
 }
 
-func (s *Server) pickNotifiers(channel string) []notify.Notifier {
-	channel = strings.TrimSpace(strings.ToLower(channel))
-	if channel == "" || channel == "all" {
-		return s.notifiers
+func (s *Server) pickNotifiers(ctx context.Context, channel string) ([]notify.Notifier, error) {
+	if s.alertResolver == nil {
+		return nil, nil
 	}
-	var selected []notify.Notifier
-	for _, notifier := range s.notifiers {
-		if notifier.Name() == channel {
-			selected = append(selected, notifier)
-		}
-	}
-	return selected
+	return s.alertResolver.Pick(ctx, channel)
 }
 
 func truncate(value string, limit int) string {

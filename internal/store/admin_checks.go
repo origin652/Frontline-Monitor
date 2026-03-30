@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"vps-monitor/internal/model"
@@ -26,12 +27,12 @@ type monitorCheckConfig struct {
 
 func (s *Store) GetAdminSettings(ctx context.Context) (*model.AdminSettings, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT password_hash, initialized_at, updated_at
+		SELECT password_hash, initialized_at, updated_at, alert_settings_json
 		FROM admin_settings
 		WHERE singleton = 1`)
 	var settings model.AdminSettings
-	var initializedAt, updatedAt string
-	err := row.Scan(&settings.PasswordHash, &initializedAt, &updatedAt)
+	var initializedAt, updatedAt, alertSettingsJSON string
+	err := row.Scan(&settings.PasswordHash, &initializedAt, &updatedAt, &alertSettingsJSON)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -47,18 +48,28 @@ func (s *Store) GetAdminSettings(ctx context.Context) (*model.AdminSettings, err
 	if parseErr != nil {
 		return nil, parseErr
 	}
+	if strings.TrimSpace(alertSettingsJSON) != "" {
+		if err := json.Unmarshal([]byte(alertSettingsJSON), &settings.Alerts); err != nil {
+			return nil, fmt.Errorf("unmarshal admin alert settings: %w", err)
+		}
+	}
 	return &settings, nil
 }
 
 func (s *Store) UpsertAdminSettings(ctx context.Context, settings model.AdminSettings) error {
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO admin_settings (singleton, password_hash, initialized_at, updated_at)
-		VALUES (1, ?, ?, ?)
+	alertSettingsJSON, err := marshalJSON(settings.Alerts)
+	if err != nil {
+		return fmt.Errorf("marshal admin alert settings: %w", err)
+	}
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO admin_settings (singleton, password_hash, initialized_at, updated_at, alert_settings_json)
+		VALUES (1, ?, ?, ?, ?)
 		ON CONFLICT(singleton) DO UPDATE SET
 			password_hash = excluded.password_hash,
 			initialized_at = excluded.initialized_at,
-			updated_at = excluded.updated_at`,
-		settings.PasswordHash, settings.InitializedAt.Format(timeLayout), settings.UpdatedAt.Format(timeLayout),
+			updated_at = excluded.updated_at,
+			alert_settings_json = excluded.alert_settings_json`,
+		settings.PasswordHash, settings.InitializedAt.Format(timeLayout), settings.UpdatedAt.Format(timeLayout), alertSettingsJSON,
 	)
 	return err
 }

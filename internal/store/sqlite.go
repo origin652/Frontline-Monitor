@@ -153,7 +153,8 @@ func (s *Store) init(ctx context.Context) error {
 			singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
 			password_hash TEXT NOT NULL,
 			initialized_at TEXT NOT NULL,
-			updated_at TEXT NOT NULL
+			updated_at TEXT NOT NULL,
+			alert_settings_json TEXT NOT NULL DEFAULT '{}'
 		)`,
 		`CREATE TABLE IF NOT EXISTS admin_sessions (
 			session_id TEXT PRIMARY KEY,
@@ -207,6 +208,7 @@ func (s *Store) init(ctx context.Context) error {
 		`ALTER TABLE metric_samples ADD COLUMN disk_total_mb INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE metric_samples ADD COLUMN os TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE metric_samples ADD COLUMN kernel TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE admin_settings ADD COLUMN alert_settings_json TEXT NOT NULL DEFAULT '{}'`,
 	}
 	for _, stmt := range migrations {
 		_, _ = s.db.ExecContext(ctx, stmt) // ignore "duplicate column" errors
@@ -836,10 +838,11 @@ func (s *Store) Restore(ctx context.Context, snap SnapshotData) error {
 	}
 
 	if snap.AdminSettings != nil {
+		alertSettingsJSON, _ := marshalJSON(snap.AdminSettings.Alerts)
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO admin_settings (singleton, password_hash, initialized_at, updated_at)
-			VALUES (1, ?, ?, ?)`,
-			snap.AdminSettings.PasswordHash, snap.AdminSettings.InitializedAt.Format(timeLayout), snap.AdminSettings.UpdatedAt.Format(timeLayout),
+			INSERT INTO admin_settings (singleton, password_hash, initialized_at, updated_at, alert_settings_json)
+			VALUES (1, ?, ?, ?, ?)`,
+			snap.AdminSettings.PasswordHash, snap.AdminSettings.InitializedAt.Format(timeLayout), snap.AdminSettings.UpdatedAt.Format(timeLayout), alertSettingsJSON,
 		); err != nil {
 			return err
 		}

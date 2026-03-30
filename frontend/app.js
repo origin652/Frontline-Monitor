@@ -258,6 +258,8 @@
   let currentAdminChecks = [];
   let currentAdminNodes = [];
   let currentAdminMembers = [];
+  let currentAdminAlerts = {};
+  let activeAdminSection = "alerts";
   let activeAdminCheckID = "";
   let activeAdminNodeID = "";
 
@@ -361,6 +363,13 @@
     if (sidebarDismiss) {
       event.preventDefault();
       toggleSidebarDrawer(false);
+      return;
+    }
+
+    const adminSectionTrigger = event.target.closest("[data-admin-section-trigger]");
+    if (adminSectionTrigger) {
+      event.preventDefault();
+      handleAdminSectionTrigger(adminSectionTrigger);
       return;
     }
 
@@ -690,6 +699,32 @@
     node.textContent = localizeText(message || "");
   }
 
+  function setAdminAlertNotice(channel, message, isError) {
+    const node = document.getElementById("admin-alert-notice-" + String(channel || ""));
+    if (!node) {
+      return;
+    }
+    node.className = "admin-notice" + (isError ? " is-error" : "");
+    node.textContent = localizeText(message || "");
+  }
+
+  function setAdminAlertResult(channel, markup) {
+    const node = document.getElementById("admin-alert-result-" + String(channel || ""));
+    if (!node) {
+      return;
+    }
+    node.innerHTML = localizeMarkup(markup || "");
+  }
+
+  function handleAdminSectionTrigger(button) {
+    const nextSection = normalizeAdminSection(button.dataset.adminSectionTrigger || "");
+    if (activeAdminSection === nextSection) {
+      return;
+    }
+    activeAdminSection = nextSection;
+    syncAdminSections();
+  }
+
   function handleAdminAction(button) {
     const action = button.dataset.adminAction || "";
     if (action === "edit-check") {
@@ -726,11 +761,18 @@
     }
     if (action === "remove-member") {
       deleteAdminMember(button.dataset.nodeId || "");
+      return;
+    }
+    if (action === "reset-alert-channel") {
+      resetAdminAlertChannel(button.dataset.channel || "");
+      return;
+    }
+    if (action === "test-alert-channel") {
+      testAdminAlertChannel(button.dataset.channel || "");
     }
   }
 
-  function bindDirectFormSubmit(formID, handler) {
-    const form = document.getElementById(formID);
+  function bindFormSubmit(form, handler) {
     if (!form || form.dataset.boundSubmit === "true") {
       return;
     }
@@ -740,6 +782,10 @@
       await handler(form, event);
     });
     form.dataset.boundSubmit = "true";
+  }
+
+  function bindDirectFormSubmit(formID, handler) {
+    bindFormSubmit(document.getElementById(formID), handler);
   }
 
   function bindPageFormHandlers() {
@@ -770,6 +816,11 @@
     });
     bindDirectFormSubmit("admin-node-name-form", async (form) => {
       await submitAdminNodeName(form);
+    });
+    document.querySelectorAll("[data-admin-alert-form]").forEach((form) => {
+      bindFormSubmit(form, async (currentForm) => {
+        await submitAdminAlertChannel(currentForm);
+      });
     });
   }
 
@@ -818,10 +869,14 @@
         currentSearchQuery = "";
         searchPanelOpen = false;
       }
-      app.innerHTML = localizeMarkup(renderShell(view));
+      if (backgroundRefresh && routeKey === lastRouteKey && app.innerHTML) {
+        patchRenderedShell(view);
+      } else {
+        app.innerHTML = localizeMarkup(renderShell(view));
+        openControlMenu = "";
+        openAdminSelectMenuID = "";
+      }
       lastRouteKey = routeKey;
-      openControlMenu = "";
-      openAdminSelectMenuID = "";
       syncThemeSelect();
       syncLanguageSelect();
       syncControlMenus();
@@ -829,6 +884,7 @@
       bindPageFormHandlers();
       syncAdminCheckForm();
       syncAdminSelectMenus();
+      syncAdminSections();
       syncAdminRowSelection();
       syncSidebarDrawer();
       scheduleRefresh();
@@ -863,9 +919,30 @@
       syncLanguageSelect();
       syncControlMenus();
       syncSearchUI();
+      syncAdminSections();
       syncSidebarDrawer();
       scheduleRefresh();
     }
+  }
+
+  function patchRenderedShell(view) {
+    const shell = document.createElement("div");
+    shell.innerHTML = localizeMarkup(renderShell(view));
+    replaceShellRegion(shell, ".obs-sidebar__context");
+    replaceShellRegion(shell, ".obs-sidebar__nav");
+    replaceShellRegion(shell, ".obs-sidebar__footer");
+    replaceShellRegion(shell, ".obs-topbar__heading");
+    replaceShellRegion(shell, ".obs-topbar__actions");
+    replaceShellRegion(shell, ".obs-main");
+  }
+
+  function replaceShellRegion(nextShell, selector) {
+    const current = app.querySelector(selector);
+    const next = nextShell.querySelector(selector);
+    if (!current || !next) {
+      return;
+    }
+    current.replaceWith(next);
   }
 
   function toggleSidebarDrawer(force) {
@@ -1252,16 +1329,20 @@
     let checks = [];
     let nodes = [];
     let members = [];
+    let alerts = {};
     if (meta.is_admin) {
-      [checks, nodes, members] = await Promise.all([
+      [checks, nodes, members, alerts] = await Promise.all([
         fetchJSON("/api/v1/admin/checks").catch(() => []),
         fetchJSON("/api/v1/admin/nodes").catch(() => []),
-        fetchJSON("/api/v1/admin/members").catch(() => [])
+        fetchJSON("/api/v1/admin/members").catch(() => []),
+        fetchJSON("/api/v1/admin/alerts").catch(() => ({}))
       ]);
     }
     currentAdminChecks = Array.isArray(checks) ? checks : [];
     currentAdminNodes = Array.isArray(nodes) ? nodes : [];
     currentAdminMembers = Array.isArray(members) ? members : [];
+    currentAdminAlerts = alerts && typeof alerts === "object" ? alerts : {};
+    activeAdminSection = normalizeAdminSection(activeAdminSection);
 
     return {
       page: "admin",
@@ -1274,7 +1355,7 @@
       leaderName: nodeLabelFrom(meta.leader_name, meta.leader_id),
       meta: meta,
       generatedAt: new Date().toISOString(),
-      content: renderAdminPage(meta, checks, nodes, members),
+      content: renderAdminPage(meta, checks, nodes, members, alerts),
       searchIndex: buildSearchIndex({
         snapshot: { node_id: meta.node_id, node_name: meta.node_name, nodes: [], events: [], incidents: [] },
         incidents: [],
@@ -1567,100 +1648,159 @@
     `;
   }
 
-  function renderAdminPage(meta, checks, nodes, members) {
+  function renderAdminPage(meta, checks, nodes, members, alerts) {
     const list = Array.isArray(checks) ? checks : [];
     const nodeList = Array.isArray(nodes) ? nodes : [];
     const memberList = Array.isArray(members) ? members : [];
+    const alertMap = alerts && typeof alerts === "object" ? alerts : {};
     const initialized = Boolean(meta && meta.admin_initialized);
     const isAdmin = Boolean(meta && meta.is_admin);
 
     if (!initialized) {
-      return `
-        <main class="obs-page obs-page--admin">
-          <section class="obs-section admin-panel">
-            <div class="obs-section__head">
-              <div>
-                <p class="obs-section__eyebrow">Bootstrap</p>
-                <h2>设置管理员密码</h2>
-              </div>
-              <p>当前系统还没有管理员。第一次设置完成后，敏感信息和管理接口才会切到受保护状态。</p>
-            </div>
-            <form id="admin-bootstrap-form" class="admin-form">
-              <label>
-                <span>Password</span>
-                <input type="password" name="password" minlength="8" required>
-              </label>
-              <button type="submit" class="admin-button">初始化管理员</button>
-            </form>
-            <p id="admin-notice" class="admin-notice"></p>
-          </section>
-        </main>
-      `;
+      return renderAdminBootstrapPanel();
     }
 
     if (!isAdmin) {
-      return `
-        <main class="obs-page obs-page--admin">
-          <section class="obs-section admin-panel">
-            <div class="obs-section__head">
-              <div>
-                <p class="obs-section__eyebrow">Authentication</p>
-                <h2>管理员登录</h2>
-              </div>
-              <p>登录后可查看敏感信息、发送测试告警，并管理运行时检测项。</p>
-            </div>
-            <form id="admin-login-form" class="admin-form">
-              <label>
-                <span>Password</span>
-                <input type="password" name="password" minlength="8" required>
-              </label>
-              <button type="submit" class="admin-button">登录</button>
-            </form>
-            <p id="admin-notice" class="admin-notice"></p>
-          </section>
-        </main>
-      `;
+      return renderAdminLoginPanel();
     }
 
+    const section = normalizeAdminSection(activeAdminSection);
     return `
       <main class="obs-page obs-page--admin">
-        <section class="obs-split admin-top">
-          <article class="obs-section admin-panel">
-            <div class="obs-section__head">
-              <div>
-                <p class="obs-section__eyebrow">Session</p>
-                <h2>管理员会话</h2>
-              </div>
-            </div>
-            <div class="admin-actions">
-              <form id="admin-logout-form">
-                <button type="submit" class="admin-button admin-button--secondary">退出登录</button>
-              </form>
-            </div>
-            <p id="admin-notice" class="admin-notice"></p>
-          </article>
-
-          <article class="obs-section admin-panel">
-            <div class="obs-section__head">
-              <div>
-                <p class="obs-section__eyebrow">Password</p>
-                <h2>修改管理员密码</h2>
-              </div>
-            </div>
-            <form id="admin-password-form" class="admin-form">
-              <label>
-                <span>Current Password</span>
-                <input type="password" name="current_password" minlength="8" required>
-              </label>
-              <label>
-                <span>New Password</span>
-                <input type="password" name="new_password" minlength="8" required>
-              </label>
-              <button type="submit" class="admin-button">更新密码</button>
-            </form>
-          </article>
+        <section class="admin-hub">
+          ${renderAdminSubnav(section, list, nodeList, memberList, alertMap)}
+          <div class="admin-stage">
+            ${renderAdminAlertSection(section, alertMap)}
+            ${renderAdminChecksSection(section, list, nodeList)}
+            ${renderAdminNodesSection(section, nodeList)}
+            ${renderAdminMembersSection(section, memberList, meta)}
+            ${renderAdminSecuritySection(section)}
+          </div>
         </section>
+      </main>
+    `;
+  }
 
+  function renderAdminBootstrapPanel() {
+    return `
+      <main class="obs-page obs-page--admin">
+        <section class="obs-section admin-panel">
+          <div class="obs-section__head">
+            <div>
+              <p class="obs-section__eyebrow">Bootstrap</p>
+              <h2>设置管理员密码</h2>
+            </div>
+            <p>当前系统还没有管理员。第一次设置完成后，敏感信息和管理接口才会切到受保护状态。</p>
+          </div>
+          <form id="admin-bootstrap-form" class="admin-form">
+            <label>
+              <span>Password</span>
+              <input type="password" name="password" minlength="8" required>
+            </label>
+            <button type="submit" class="admin-button">初始化管理员</button>
+          </form>
+          <p id="admin-notice" class="admin-notice"></p>
+        </section>
+      </main>
+    `;
+  }
+
+  function renderAdminLoginPanel() {
+    return `
+      <main class="obs-page obs-page--admin">
+        <section class="obs-section admin-panel">
+          <div class="obs-section__head">
+            <div>
+              <p class="obs-section__eyebrow">Authentication</p>
+              <h2>管理员登录</h2>
+            </div>
+            <p>登录后可查看敏感信息、发送测试告警，并管理运行时检测项。</p>
+          </div>
+          <form id="admin-login-form" class="admin-form">
+            <label>
+              <span>Password</span>
+              <input type="password" name="password" minlength="8" required>
+            </label>
+            <button type="submit" class="admin-button">登录</button>
+          </form>
+          <p id="admin-notice" class="admin-notice"></p>
+        </section>
+      </main>
+    `;
+  }
+
+  function normalizeAdminSection(value) {
+    const allowed = ["alerts", "checks", "nodes", "members", "security"];
+    return allowed.includes(String(value || "")) ? String(value || "") : "alerts";
+  }
+
+  function countEnabledAdminAlerts(alerts) {
+    return ["telegram", "smtp", "webhook"].filter((channel) => Boolean(alerts && alerts[channel] && alerts[channel].enabled)).length;
+  }
+
+  function renderAdminSubnav(section, checks, nodes, members, alerts) {
+    const sections = [
+      {
+        id: "alerts",
+        label: "Alert Channels",
+        title: "渠道配置与测试",
+        detail: countEnabledAdminAlerts(alerts) + " 个当前启用"
+      },
+      {
+        id: "checks",
+        label: "Runtime Checks",
+        title: "运行时检测项",
+        detail: String(Array.isArray(checks) ? checks.length : 0) + " 条规则"
+      },
+      {
+        id: "nodes",
+        label: "Node Names",
+        title: "节点显示名称",
+        detail: String(Array.isArray(nodes) ? nodes.length : 0) + " 个节点"
+      },
+      {
+        id: "members",
+        label: "Cluster Membership",
+        title: "成员与角色",
+        detail: String(Array.isArray(members) ? members.length : 0) + " 个成员"
+      },
+      {
+        id: "security",
+        label: "Security",
+        title: "会话与密码",
+        detail: "管理员入口"
+      }
+    ];
+
+    return `
+      <aside class="obs-section admin-panel admin-subnav">
+        <div class="obs-section__head">
+          <div>
+            <p class="obs-section__eyebrow">Admin Console</p>
+            <h2>把后台拆成清晰的工作区</h2>
+          </div>
+          <p>每个分区只负责一类动作，避免把渠道、检测项、节点名称和成员管理堆在一整页里。</p>
+        </div>
+        <div class="admin-subnav__list">
+          ${sections.map((item) => `
+            <button
+              type="button"
+              class="admin-subnav__item${item.id === section ? " is-active" : ""}"
+              data-admin-section-trigger="${escapeHTML(item.id)}"
+            >
+              <span>${escapeHTML(item.label)}</span>
+              <strong>${escapeHTML(item.title)}</strong>
+              <small>${escapeHTML(item.detail)}</small>
+            </button>
+          `).join("")}
+        </div>
+      </aside>
+    `;
+  }
+
+  function renderAdminChecksSection(section, list, nodeList) {
+    return `
+      <section class="admin-stage__section" data-admin-section-panel="checks"${section === "checks" ? "" : " hidden"}>
         <section class="obs-split admin-content">
           <article class="obs-section admin-panel">
             <div class="obs-section__head">
@@ -1801,7 +1941,13 @@
             </div>
           </article>
         </section>
+      </section>
+    `;
+  }
 
+  function renderAdminNodesSection(section, nodeList) {
+    return `
+      <section class="admin-stage__section" data-admin-section-panel="nodes"${section === "nodes" ? "" : " hidden"}>
         <section class="obs-split admin-content">
           <article class="obs-section admin-panel">
             <div class="obs-section__head">
@@ -1848,7 +1994,13 @@
             </div>
           </article>
         </section>
+      </section>
+    `;
+  }
 
+  function renderAdminMembersSection(section, memberList, meta) {
+    return `
+      <section class="admin-stage__section" data-admin-section-panel="members"${section === "members" ? "" : " hidden"}>
         <section class="obs-section admin-panel">
           <div class="obs-section__head">
             <div>
@@ -1864,8 +2016,284 @@
           </div>
           <p id="admin-member-notice" class="admin-notice"></p>
         </section>
-      </main>
+      </section>
     `;
+  }
+
+  function renderAdminSecuritySection(section) {
+    return `
+      <section class="admin-stage__section" data-admin-section-panel="security"${section === "security" ? "" : " hidden"}>
+        <section class="obs-split admin-top">
+          <article class="obs-section admin-panel">
+            <div class="obs-section__head">
+              <div>
+                <p class="obs-section__eyebrow">Session</p>
+                <h2>管理员会话</h2>
+              </div>
+              <p>这里只保留当前会话动作，避免和其它配置编辑器混在同一块区域里。</p>
+            </div>
+            <div class="admin-actions">
+              <form id="admin-logout-form">
+                <button type="submit" class="admin-button admin-button--secondary">退出登录</button>
+              </form>
+            </div>
+            <p id="admin-notice" class="admin-notice"></p>
+          </article>
+
+          <article class="obs-section admin-panel">
+            <div class="obs-section__head">
+              <div>
+                <p class="obs-section__eyebrow">Password</p>
+                <h2>修改管理员密码</h2>
+              </div>
+            </div>
+            <form id="admin-password-form" class="admin-form">
+              <label>
+                <span>Current Password</span>
+                <input type="password" name="current_password" minlength="8" required>
+              </label>
+              <label>
+                <span>New Password</span>
+                <input type="password" name="new_password" minlength="8" required>
+              </label>
+              <button type="submit" class="admin-button">更新密码</button>
+            </form>
+          </article>
+        </section>
+      </section>
+    `;
+  }
+
+  function renderAdminAlertSection(section, alerts) {
+    const alertMap = alerts && typeof alerts === "object" ? alerts : {};
+    return `
+      <section class="admin-stage__section" data-admin-section-panel="alerts"${section === "alerts" ? "" : " hidden"}>
+        <article class="obs-section admin-panel">
+          <div class="obs-section__head">
+            <div>
+              <p class="obs-section__eyebrow">Alert Channels</p>
+              <h2>后台直接配置和测试 Telegram / SMTP / webhook</h2>
+            </div>
+            <p>保存后立即接管运行时通知配置。留空密钥会保留当前已保存值，测试按钮使用当前已保存配置，不会创建真实 incident。</p>
+          </div>
+          <div class="admin-alert-grid">
+            ${renderAdminAlertCard("telegram", alertMap.telegram || {})}
+            ${renderAdminAlertCard("smtp", alertMap.smtp || {})}
+            ${renderAdminAlertCard("webhook", alertMap.webhook || {})}
+          </div>
+        </article>
+      </section>
+    `;
+  }
+
+  function renderAdminAlertCard(channel, view) {
+    const channelKey = String(channel || "");
+    const data = view && typeof view === "object" ? view : {};
+    const managed = Boolean(data.managed);
+    const secretState = describeAdminAlertSecretState(channelKey, data);
+    const updatedText = managed && data.updated_at
+      ? "运行时接管于 " + formatDateTime(data.updated_at)
+      : "未接管时继续回退到 monitor.yaml / 环境变量";
+
+    return `
+      <article class="admin-alert-card">
+        <div class="admin-alert-card__head">
+          <div>
+            <p class="obs-section__eyebrow">${escapeHTML(adminAlertEyebrow(channelKey))}</p>
+            <h3>${escapeHTML(adminAlertTitle(channelKey))}</h3>
+          </div>
+          <div class="admin-chip-row">
+            ${renderAdminChip(managed ? "运行时配置" : "monitor.yaml / 环境变量", managed ? "healthy" : "unknown")}
+            ${renderAdminChip(data.enabled ? "已启用" : "已停用", data.enabled ? "healthy" : "unknown")}
+            ${renderAdminChip(secretState.label, secretState.tone)}
+          </div>
+        </div>
+        <p class="admin-alert-card__copy">${escapeHTML(adminAlertDescription(channelKey))}</p>
+        <p class="admin-alert-card__meta">${escapeHTML(updatedText)}</p>
+
+        <form
+          id="admin-alert-form-${escapeHTML(channelKey)}"
+          class="admin-form admin-form--grid admin-alert-form"
+          data-admin-alert-form
+          data-channel="${escapeHTML(channelKey)}"
+        >
+          <label class="admin-toggle admin-field-span-2">
+            <input type="checkbox" name="enabled"${data.enabled ? " checked" : ""}>
+            <span class="admin-toggle__box" aria-hidden="true"></span>
+            <span class="admin-toggle__text">
+              <strong>Enabled</strong>
+              <small>${escapeHTML(channelKey === "telegram" ? "保存后即可进入运行时通知链路。" : "保存后 leader 会使用这里的配置发送通知。")}</small>
+            </span>
+          </label>
+
+          ${renderAdminAlertFields(channelKey, data)}
+
+          <label class="admin-field-span-2">
+            <span>测试备注</span>
+            <textarea name="note" placeholder="可选。测试时会附带到告警内容里，便于确认收到的是哪次验证。"></textarea>
+          </label>
+
+          <div class="admin-form__actions admin-field-span-2">
+            <button type="submit" class="admin-button">保存配置</button>
+            ${managed
+              ? `<button type="button" class="admin-button admin-button--secondary" data-admin-action="reset-alert-channel" data-channel="${escapeHTML(channelKey)}">恢复 monitor.yaml</button>`
+              : ""}
+            <button type="button" class="admin-button admin-button--secondary" data-admin-action="test-alert-channel" data-channel="${escapeHTML(channelKey)}">发送测试</button>
+          </div>
+        </form>
+
+        <p id="admin-alert-notice-${escapeHTML(channelKey)}" class="admin-notice"></p>
+        <div id="admin-alert-result-${escapeHTML(channelKey)}" class="admin-alert-result">
+          ${renderAdminAlertResultPlaceholder(channelKey)}
+        </div>
+      </article>
+    `;
+  }
+
+  function renderAdminAlertFields(channel, view) {
+    if (channel === "telegram") {
+      return `
+        <label>
+          <span>Bot Token</span>
+          <input type="password" name="bot_token" placeholder="留空则保留当前已保存 token">
+        </label>
+        <label>
+          <span>Chat ID</span>
+          <input type="text" name="chat_id" value="${escapeHTML(view.chat_id || "")}" placeholder="例如 123456789">
+        </label>
+        <label>
+          <span>Parse Mode</span>
+          <input type="text" name="parse_mode" value="${escapeHTML(view.parse_mode || "")}" placeholder="Markdown">
+        </label>
+        <label>
+          <span>Timeout</span>
+          <input type="text" name="request_timeout" value="${escapeHTML(view.request_timeout || "")}" placeholder="10s">
+        </label>
+      `;
+    }
+
+    if (channel === "smtp") {
+      return `
+        <label>
+          <span>SMTP Host</span>
+          <input type="text" name="smtp_host" value="${escapeHTML(view.smtp_host || "")}" placeholder="smtp.example.com">
+        </label>
+        <label>
+          <span>SMTP Port</span>
+          <input type="number" name="smtp_port" min="1" max="65535" value="${escapeHTML(view.smtp_port || "")}" placeholder="587">
+        </label>
+        <label>
+          <span>Username</span>
+          <input type="text" name="smtp_username" value="${escapeHTML(view.smtp_username || "")}" placeholder="ops@example.com">
+        </label>
+        <label>
+          <span>Password</span>
+          <input type="password" name="smtp_password" placeholder="留空则保留当前已保存密码">
+        </label>
+        <label>
+          <span>From</span>
+          <input type="email" name="smtp_from" value="${escapeHTML(view.smtp_from || "")}" placeholder="ops@example.com">
+        </label>
+        <label class="admin-field-span-2">
+          <span>Recipients</span>
+          <textarea name="smtp_to_text" placeholder="每行一个收件地址">${escapeHTML(Array.isArray(view.smtp_to) ? view.smtp_to.join("\n") : "")}</textarea>
+        </label>
+        <label>
+          <span>Timeout</span>
+          <input type="text" name="request_timeout" value="${escapeHTML(view.request_timeout || "")}" placeholder="15s">
+        </label>
+        <label>
+          <span>Subject Prefix</span>
+          <input type="text" name="subject_prefix" value="${escapeHTML(view.subject_prefix || "")}" placeholder="[Frontline]">
+        </label>
+        <label class="admin-toggle admin-field-span-2">
+          <input type="checkbox" name="smtp_use_starttls"${view.smtp_use_starttls ? " checked" : ""}>
+          <span class="admin-toggle__box" aria-hidden="true"></span>
+          <span class="admin-toggle__text">
+            <strong>Use STARTTLS</strong>
+            <small>如果你的 SMTP 服务在 587 端口协商加密，保持开启。</small>
+          </span>
+        </label>
+      `;
+    }
+
+    return `
+      <label class="admin-field-span-2">
+        <span>Webhook URL</span>
+        <input type="url" name="webhook_url" value="${escapeHTML(view.webhook_url || "")}" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/xxxx">
+      </label>
+      <label>
+        <span>Secret</span>
+        <input type="password" name="secret" placeholder="留空则保留当前已保存签名密钥">
+      </label>
+      <label>
+        <span>Title Prefix</span>
+        <input type="text" name="title_prefix" value="${escapeHTML(view.title_prefix || "")}" placeholder="[Frontline] ">
+      </label>
+      <label>
+        <span>Timeout</span>
+        <input type="text" name="request_timeout" value="${escapeHTML(view.request_timeout || "")}" placeholder="10s">
+      </label>
+    `;
+  }
+
+  function renderAdminChip(label, tone) {
+    return `<span class="admin-chip" data-tone="${escapeHTML(tone || "unknown")}">${escapeHTML(label || "")}</span>`;
+  }
+
+  function renderAdminAlertResultPlaceholder(channel) {
+    const text = channel === "smtp"
+      ? "测试将使用当前已保存的 SMTP 配置，结果会直接显示在这里。"
+      : channel === "telegram"
+        ? "测试将使用当前已保存的 Telegram 配置，不会读取表单里未保存的改动。"
+        : "测试将使用当前已保存的 webhook 配置，并显示返回结果。";
+    return `<p class="admin-alert-result__placeholder">${escapeHTML(text)}</p>`;
+  }
+
+  function adminAlertTitle(channel) {
+    if (channel === "telegram") {
+      return "Telegram";
+    }
+    if (channel === "smtp") {
+      return "SMTP";
+    }
+    return "Webhook / 飞书 / 企业微信";
+  }
+
+  function adminAlertEyebrow(channel) {
+    if (channel === "telegram") {
+      return "Bot Push";
+    }
+    if (channel === "smtp") {
+      return "Mail Delivery";
+    }
+    return "Webhook Delivery";
+  }
+
+  function adminAlertDescription(channel) {
+    if (channel === "telegram") {
+      return "适合第一时间接收节点状态变化。通常只需要 bot token、chat id 和 parse mode。";
+    }
+    if (channel === "smtp") {
+      return "适合发给邮箱归档。这里支持运行时覆盖主机、收件人、主题前缀和 STARTTLS。";
+    }
+    return "适合飞书、企业微信等机器人入口。保存 URL 后就能直接从后台发测试。";
+  }
+
+  function describeAdminAlertSecretState(channel, view) {
+    if (channel === "telegram") {
+      return view.secret_configured
+        ? { label: "token 已就绪", tone: "healthy" }
+        : { label: "缺少 token", tone: "critical" };
+    }
+    if (channel === "smtp") {
+      return view.secret_configured
+        ? { label: "密码已保存", tone: "healthy" }
+        : { label: "无密码", tone: "unknown" };
+    }
+    return view.secret_configured
+      ? { label: "签名已开启", tone: "healthy" }
+      : { label: "无签名", tone: "unknown" };
   }
 
   function renderAdminCheckRow(check) {
@@ -4053,6 +4481,124 @@
     }
   }
 
+  async function submitAdminAlertChannel(form) {
+    const channel = String(form && form.dataset ? form.dataset.channel || "" : "");
+    if (!channel) {
+      return;
+    }
+    setAdminAlertNotice(channel, "正在保存渠道配置...", false);
+    try {
+      const payload = buildAdminAlertPayload(channel, form);
+      await requestJSON("/api/v1/admin/alerts/" + encodeURIComponent(channel), {
+        method: "PUT",
+        body: payload
+      });
+      await renderRoute();
+      setAdminAlertNotice(channel, "渠道配置已保存。", false);
+      setAdminAlertResult(channel, renderAdminAlertResultPlaceholder(channel));
+    } catch (error) {
+      setAdminAlertNotice(channel, error.message || "保存渠道配置失败", true);
+    }
+  }
+
+  async function resetAdminAlertChannel(channel) {
+    if (!channel) {
+      return;
+    }
+    setAdminAlertNotice(channel, "正在恢复 monitor.yaml...", false);
+    try {
+      await requestJSON("/api/v1/admin/alerts/" + encodeURIComponent(channel), {
+        method: "DELETE"
+      });
+      await renderRoute();
+      setAdminAlertNotice(channel, "已恢复到 monitor.yaml / 环境变量。", false);
+      setAdminAlertResult(channel, renderAdminAlertResultPlaceholder(channel));
+    } catch (error) {
+      setAdminAlertNotice(channel, error.message || "恢复渠道配置失败", true);
+    }
+  }
+
+  async function testAdminAlertChannel(channel) {
+    if (!channel) {
+      return;
+    }
+    const form = document.getElementById("admin-alert-form-" + channel);
+    setAdminAlertNotice(channel, "正在发送测试告警...", false);
+    setAdminAlertResult(channel, "<p class=\"admin-alert-result__placeholder\">正在发送测试告警...</p>");
+
+    try {
+      const data = await requestJSON("/api/v1/test-alert", {
+        method: "POST",
+        body: {
+          channel: channel,
+          note: fieldValue(form, "note")
+        }
+      });
+      setAdminAlertNotice(channel, "测试告警已发送。", false);
+      setAdminAlertResult(channel, renderAdminAlertTestResult(data));
+    } catch (error) {
+      setAdminAlertNotice(channel, error.message || "测试告警失败", true);
+      setAdminAlertResult(channel, `<p class="admin-alert-result__placeholder">${escapeHTML(error.message || "测试告警失败")}</p>`);
+    }
+  }
+
+  function buildAdminAlertPayload(channel, form) {
+    if (channel === "telegram") {
+      return {
+        enabled: fieldChecked(form, "enabled"),
+        bot_token: fieldValue(form, "bot_token"),
+        chat_id: fieldValue(form, "chat_id"),
+        parse_mode: fieldValue(form, "parse_mode"),
+        request_timeout: fieldValue(form, "request_timeout")
+      };
+    }
+    if (channel === "smtp") {
+      return {
+        enabled: fieldChecked(form, "enabled"),
+        smtp_host: fieldValue(form, "smtp_host"),
+        smtp_port: fieldNumber(form, "smtp_port"),
+        smtp_username: fieldValue(form, "smtp_username"),
+        smtp_password: fieldValue(form, "smtp_password"),
+        smtp_from: fieldValue(form, "smtp_from"),
+        smtp_to: parseAdminAlertRecipients(fieldValue(form, "smtp_to_text")),
+        smtp_use_starttls: fieldChecked(form, "smtp_use_starttls"),
+        subject_prefix: fieldValue(form, "subject_prefix"),
+        request_timeout: fieldValue(form, "request_timeout")
+      };
+    }
+    return {
+      enabled: fieldChecked(form, "enabled"),
+      webhook_url: fieldValue(form, "webhook_url"),
+      secret: fieldValue(form, "secret"),
+      title_prefix: fieldValue(form, "title_prefix"),
+      request_timeout: fieldValue(form, "request_timeout")
+    };
+  }
+
+  function parseAdminAlertRecipients(value) {
+    return String(value || "")
+      .split(/[\n,]+/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  function renderAdminAlertTestResult(data) {
+    const items = Array.isArray(data && data.results) ? data.results : [];
+    return `
+      <div class="admin-alert-result__summary">
+        <strong>发送时间 ${escapeHTML(formatDateTime(data && data.sent_at))}</strong>
+      </div>
+      <div class="admin-alert-result__list">
+        ${items.map((item) => `
+          <article class="admin-alert-result__item status-surface" data-status="${item && item.ok ? "healthy" : "critical"}">
+            <strong>${escapeHTML(item && item.channel ? item.channel : "channel")}</strong>
+            <p>${escapeHTML(item && item.ok ? (item.response || "OK") : (item && item.error ? item.error : "FAILED"))}</p>
+          </article>
+        `).join("")}
+      </div>
+    `;
+  }
+
   async function deleteAdminCheck(id) {
     if (!id) {
       return;
@@ -4235,6 +4781,20 @@
       field.hidden = !isVisible;
     });
     syncAdminSelectMenus();
+  }
+
+  function syncAdminSections() {
+    const current = normalizeAdminSection(activeAdminSection);
+    document.querySelectorAll("[data-admin-section-trigger]").forEach((button) => {
+      const active = (button.dataset.adminSectionTrigger || "") === current;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-pressed", active ? "true" : "false");
+    });
+    document.querySelectorAll("[data-admin-section-panel]").forEach((panel) => {
+      const active = (panel.dataset.adminSectionPanel || "") === current;
+      panel.hidden = !active;
+      panel.classList.toggle("is-active", active);
+    });
   }
 
   function syncAdminRowSelection() {

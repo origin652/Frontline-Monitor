@@ -106,6 +106,7 @@ type AlertsConfig struct {
 type TelegramConfig struct {
 	Enabled     bool   `yaml:"enabled"`
 	BotTokenEnv string `yaml:"bot_token_env"`
+	BotToken    string `yaml:"-"`
 	ChatID      string `yaml:"chat_id"`
 	ParseMode   string `yaml:"parse_mode"`
 	RequestTout string `yaml:"request_timeout"`
@@ -117,6 +118,7 @@ type SMTPConfig struct {
 	Port          int      `yaml:"port"`
 	Username      string   `yaml:"username"`
 	PasswordEnv   string   `yaml:"password_env"`
+	Password      string   `yaml:"-"`
 	From          string   `yaml:"from"`
 	To            []string `yaml:"to"`
 	RequestTout   string   `yaml:"request_timeout"`
@@ -128,6 +130,7 @@ type WebhookAlertConfig struct {
 	Enabled     bool   `yaml:"enabled"`
 	WebhookURL  string `yaml:"webhook_url"`
 	SecretEnv   string `yaml:"secret_env"`
+	Secret      string `yaml:"-"`
 	RequestTout string `yaml:"request_timeout"`
 	TitlePrefix string `yaml:"title_prefix"`
 }

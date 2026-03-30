@@ -17,7 +17,8 @@
 - leader 基于心跳和互探结果计算 `healthy / degraded / critical / unknown`
 - active incident、事件流、入口 DNS 状态会复制到所有节点
 - 新节点可通过 `join_seeds` 自动加入，旧节点会在运行时自动看到它
-- `/admin` 里可以直接查看 Cluster Membership，并做角色调整或移除
+- `/admin` 里按分区管理 Alert Channels、Runtime Checks、Node Names、Cluster Membership
+- 告警渠道既可继续使用 `monitor.yaml` / 环境变量，也可在后台运行时覆盖并直接发送测试
 - 页面可以从任意健康节点访问
 
 ## 项目结构
@@ -72,12 +73,13 @@ vps-monitor.exe -config monitor.local.yaml
 
 ## 测试告警
 
-事件页现在带了一个“发送测试告警”面板。
+事件页现在带了一个“发送测试告警”面板，管理员后台也新增了按渠道配置和测试的入口。
 
 - 本机访问时，如果没有设置 `MONITOR_TEST_ALERT_TOKEN`，可以直接触发测试
 - 如果要远程触发，先设置环境变量 `MONITOR_TEST_ALERT_TOKEN`
 - 设置后，事件页会要求输入 token，后端也接受 `Authorization: Bearer <token>`
 - 测试消息不会创建真实 incident，只会直接调用已启用的通知渠道
+- 管理后台里的渠道测试会使用当前已保存的运行时配置；如果某个渠道没有被后台接管，则自动回退到 `monitor.yaml` / 环境变量
 
 ## 生产部署
 

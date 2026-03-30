@@ -20,22 +20,22 @@ import (
 )
 
 type Engine struct {
-	cfg       *config.Config
-	store     *store.Store
-	cluster   *cluster.Manager
-	cf        *cloudflare.Client
-	notifiers []notify.Notifier
-	logger    *slog.Logger
+	cfg           *config.Config
+	store         *store.Store
+	cluster       *cluster.Manager
+	cf            *cloudflare.Client
+	alertResolver *notify.Resolver
+	logger        *slog.Logger
 }
 
-func New(cfg *config.Config, st *store.Store, cl *cluster.Manager, cf *cloudflare.Client, notifiers []notify.Notifier, logger *slog.Logger) *Engine {
+func New(cfg *config.Config, st *store.Store, cl *cluster.Manager, cf *cloudflare.Client, alertResolver *notify.Resolver, logger *slog.Logger) *Engine {
 	return &Engine{
-		cfg:       cfg,
-		store:     st,
-		cluster:   cl,
-		cf:        cf,
-		notifiers: notifiers,
-		logger:    logger,
+		cfg:           cfg,
+		store:         st,
+		cluster:       cl,
+		cf:            cf,
+		alertResolver: alertResolver,
+		logger:        logger,
 	}
 }
 
@@ -476,7 +476,15 @@ func shouldRepeat(lastNotified *time.Time, now time.Time) bool {
 }
 
 func (e *Engine) sendAlert(ctx context.Context, action string, incident model.Incident) error {
-	for _, notifier := range e.notifiers {
+	var notifiers []notify.Notifier
+	if e.alertResolver != nil {
+		resolved, err := e.alertResolver.Build(ctx)
+		if err != nil {
+			return err
+		}
+		notifiers = resolved
+	}
+	for _, notifier := range notifiers {
 		deliveryKey := incident.ID + ":" + notifier.Name() + ":" + deliverySlot(action, incident, time.Now().UTC())
 		response, err := e.claimAndSend(ctx, notifier, action, incident, deliveryKey)
 		if err != nil {

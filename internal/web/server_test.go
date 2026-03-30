@@ -15,6 +15,7 @@ import (
 	"vps-monitor/internal/cluster"
 	"vps-monitor/internal/config"
 	"vps-monitor/internal/model"
+	"vps-monitor/internal/notify"
 	"vps-monitor/internal/store"
 )
 
@@ -71,7 +72,8 @@ func TestAdminBootstrapChecksAndRedaction(t *testing.T) {
 	waitForLeader(t, manager)
 
 	submitter := cluster.NewSubmitter(manager, cfg)
-	server, err := New(cfg, st, manager, submitter, nil, logger)
+	alertResolver := notify.NewResolver(cfg, st, logger)
+	server, err := New(cfg, st, manager, submitter, alertResolver, logger)
 	if err != nil {
 		t.Fatalf("new server: %v", err)
 	}
@@ -309,6 +311,153 @@ func TestAdminBootstrapChecksAndRedaction(t *testing.T) {
 	}
 	if cookie == "" {
 		t.Fatal("expected new login cookie")
+	}
+}
+
+func TestAdminAlertSettingsRuntimeOverrideAndReset(t *testing.T) {
+	t.Parallel()
+
+	raftAddr := freeTCPAddr(t)
+	cfg := &config.Config{
+		Cluster: config.ClusterConfig{
+			NodeID:   "node-a",
+			RaftAddr: raftAddr,
+			Peers: []config.ClusterPeer{
+				{
+					NodeID:      "node-a",
+					DisplayName: "Shanghai-A",
+					APIAddr:     "127.0.0.1:8443",
+					RaftAddr:    raftAddr,
+					PublicIPv4:  "203.0.113.10",
+					Priority:    100,
+				},
+			},
+			Priority: 100,
+		},
+		Network: config.NetworkConfig{
+			ListenAddr:      "127.0.0.1:8443",
+			PublicIPv4:      "203.0.113.10",
+			PublicHTTPSPort: 443,
+		},
+		Storage: config.StorageConfig{
+			DataDir:       t.TempDir(),
+			SQLitePath:    t.TempDir() + "/monitor.db",
+			RaftDir:       t.TempDir() + "/raft",
+			RetentionDays: 30,
+		},
+	}
+
+	st, err := store.Open(cfg.Storage.SQLitePath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	manager, err := cluster.NewManager(cfg, st, logger)
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = manager.Shutdown(ctx)
+	}()
+
+	waitForLeader(t, manager)
+
+	submitter := cluster.NewSubmitter(manager, cfg)
+	server, err := New(cfg, st, manager, submitter, notify.NewResolver(cfg, st, logger), logger)
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+	ts := httptest.NewServer(server.Handler())
+	defer ts.Close()
+
+	status, _, cookie := requestJSON(t, ts.Client(), http.MethodPost, ts.URL+"/api/v1/admin/bootstrap", map[string]any{
+		"password": "supersecret-password",
+	}, "")
+	if status != http.StatusCreated {
+		t.Fatalf("bootstrap status = %d", status)
+	}
+
+	status, _, _ = requestJSON(t, ts.Client(), http.MethodPut, ts.URL+"/api/v1/admin/alerts/telegram", map[string]any{
+		"enabled":         true,
+		"bot_token":       "runtime-telegram-token",
+		"chat_id":         "123456789",
+		"parse_mode":      "Markdown",
+		"request_timeout": "12s",
+	}, cookie)
+	if status != http.StatusOK {
+		t.Fatalf("put telegram alert status = %d", status)
+	}
+
+	status, alerts, _ := requestJSON(t, ts.Client(), http.MethodGet, ts.URL+"/api/v1/admin/alerts", nil, cookie)
+	if status != http.StatusOK {
+		t.Fatalf("get admin alerts status = %d", status)
+	}
+	telegram, ok := alerts["telegram"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected telegram alert view, got %#v", alerts["telegram"])
+	}
+	if telegram["source"] != "runtime" {
+		t.Fatalf("telegram source = %v, want runtime", telegram["source"])
+	}
+	if telegram["enabled"] != true {
+		t.Fatalf("telegram enabled = %v, want true", telegram["enabled"])
+	}
+	if telegram["secret_configured"] != true {
+		t.Fatalf("telegram secret_configured = %v, want true", telegram["secret_configured"])
+	}
+
+	status, meta, _ := requestJSON(t, ts.Client(), http.MethodGet, ts.URL+"/api/v1/meta", nil, cookie)
+	if status != http.StatusOK {
+		t.Fatalf("meta status = %d", status)
+	}
+	channels, ok := meta["test_alert_channels"].([]any)
+	if !ok || len(channels) != 1 || channels[0] != "telegram" {
+		t.Fatalf("test_alert_channels = %#v, want [telegram]", meta["test_alert_channels"])
+	}
+
+	status, _, _ = requestJSON(t, ts.Client(), http.MethodPost, ts.URL+"/api/v1/admin/password", map[string]any{
+		"current_password": "supersecret-password",
+		"new_password":     "another-secret-password",
+	}, cookie)
+	if status != http.StatusOK {
+		t.Fatalf("password update status = %d", status)
+	}
+
+	status, alerts, _ = requestJSON(t, ts.Client(), http.MethodGet, ts.URL+"/api/v1/admin/alerts", nil, cookie)
+	if status != http.StatusOK {
+		t.Fatalf("get admin alerts after password status = %d", status)
+	}
+	telegram, ok = alerts["telegram"].(map[string]any)
+	if !ok || telegram["source"] != "runtime" || telegram["enabled"] != true {
+		t.Fatalf("telegram alert after password update = %#v", alerts["telegram"])
+	}
+
+	status, alerts, _ = requestJSON(t, ts.Client(), http.MethodDelete, ts.URL+"/api/v1/admin/alerts/telegram", nil, cookie)
+	if status != http.StatusOK {
+		t.Fatalf("delete telegram alert status = %d", status)
+	}
+	telegram, ok = alerts["telegram"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected telegram alert view after delete, got %#v", alerts["telegram"])
+	}
+	if telegram["source"] != "config" {
+		t.Fatalf("telegram source after delete = %v, want config", telegram["source"])
+	}
+	if telegram["enabled"] != false {
+		t.Fatalf("telegram enabled after delete = %v, want false", telegram["enabled"])
+	}
+
+	status, meta, _ = requestJSON(t, ts.Client(), http.MethodGet, ts.URL+"/api/v1/meta", nil, cookie)
+	if status != http.StatusOK {
+		t.Fatalf("meta after delete status = %d", status)
+	}
+	channels, ok = meta["test_alert_channels"].([]any)
+	if !ok || len(channels) != 0 {
+		t.Fatalf("test_alert_channels after delete = %#v, want []", meta["test_alert_channels"])
 	}
 }
 

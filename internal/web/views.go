@@ -138,10 +138,9 @@ func (s *Server) nodeDetail(ctx context.Context, nodeID string, isAdmin bool, re
 	return detail, nil
 }
 
-func (s *Server) enabledAlertChannels() []string {
-	var channels []string
-	for _, notifier := range s.notifiers {
-		channels = append(channels, notifier.Name())
+func (s *Server) enabledAlertChannels(ctx context.Context) ([]string, error) {
+	if s.alertResolver == nil {
+		return nil, nil
 	}
-	return channels
+	return s.alertResolver.EnabledChannels(ctx)
 }
