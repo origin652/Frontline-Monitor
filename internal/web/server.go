@@ -45,6 +45,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 	mux.HandleFunc("GET /", s.handleFrontendApp)
 	mux.HandleFunc("GET /admin", s.handleFrontendApp)
+	mux.HandleFunc("GET /admin/{section}", s.handleFrontendApp)
 	mux.HandleFunc("GET /nodes/{nodeID}", s.handleFrontendApp)
 	mux.HandleFunc("GET /events", s.handleFrontendApp)
 	mux.HandleFunc("GET /api/v1/cluster", s.handleClusterAPI)

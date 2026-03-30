@@ -366,13 +366,6 @@
       return;
     }
 
-    const adminSectionTrigger = event.target.closest("[data-admin-section-trigger]");
-    if (adminSectionTrigger) {
-      event.preventDefault();
-      handleAdminSectionTrigger(adminSectionTrigger);
-      return;
-    }
-
     const actionButton = event.target.closest("[data-admin-action]");
     if (actionButton) {
       event.preventDefault();
@@ -716,15 +709,6 @@
     node.innerHTML = localizeMarkup(markup || "");
   }
 
-  function handleAdminSectionTrigger(button) {
-    const nextSection = normalizeAdminSection(button.dataset.adminSectionTrigger || "");
-    if (activeAdminSection === nextSection) {
-      return;
-    }
-    activeAdminSection = nextSection;
-    syncAdminSections();
-  }
-
   function handleAdminAction(button) {
     const action = button.dataset.adminAction || "";
     if (action === "edit-check") {
@@ -884,7 +868,7 @@
       bindPageFormHandlers();
       syncAdminCheckForm();
       syncAdminSelectMenus();
-      syncAdminSections();
+
       syncAdminRowSelection();
       syncSidebarDrawer();
       scheduleRefresh();
@@ -919,7 +903,7 @@
       syncLanguageSelect();
       syncControlMenus();
       syncSearchUI();
-      syncAdminSections();
+
       syncSidebarDrawer();
       scheduleRefresh();
     }
@@ -992,7 +976,7 @@
     if (!route || !route.page) {
       return "unknown";
     }
-    return route.page + ":" + (route.nodeID || "");
+    return route.page + ":" + (route.nodeID || "") + (route.adminSection || "");
   }
 
   function getStoredLanguage() {
@@ -1154,7 +1138,11 @@
       return { page: "overview" };
     }
     if (normalized === "/admin") {
-      return { page: "admin" };
+      return { page: "admin", adminSection: "alerts" };
+    }
+    const adminMatch = normalized.match(/^\/admin\/([^/]+)$/);
+    if (adminMatch) {
+      return { page: "admin", adminSection: decodeURIComponent(adminMatch[1]) };
     }
     if (normalized === "/events") {
       return { page: "events" };
@@ -1199,7 +1187,7 @@
       case "overview":
         return loadOverviewView();
       case "admin":
-        return loadAdminView();
+        return loadAdminView(route.adminSection);
       case "events":
         return loadEventsView();
       case "node":
@@ -1317,7 +1305,8 @@
     };
   }
 
-  async function loadAdminView() {
+  async function loadAdminView(section) {
+    activeAdminSection = normalizeAdminSection(section);
     const meta = await fetchJSON("/api/v1/meta").catch(() => ({
       admin_initialized: false,
       is_admin: false,
@@ -1342,10 +1331,10 @@
     currentAdminNodes = Array.isArray(nodes) ? nodes : [];
     currentAdminMembers = Array.isArray(members) ? members : [];
     currentAdminAlerts = alerts && typeof alerts === "object" ? alerts : {};
-    activeAdminSection = normalizeAdminSection(activeAdminSection);
 
     return {
       page: "admin",
+      adminSection: activeAdminSection,
       title: meta.is_admin ? "管理后台" : "管理员登录",
       localNodeID: meta.node_id || "-",
       localNodeName: nodeLabelFrom(meta.node_name, meta.node_id),
@@ -1665,18 +1654,19 @@
     }
 
     const section = normalizeAdminSection(activeAdminSection);
+    var sectionHTML = "";
+    switch (section) {
+      case "alerts": sectionHTML = renderAdminAlertSection(alertMap); break;
+      case "checks": sectionHTML = renderAdminChecksSection(list, nodeList); break;
+      case "nodes": sectionHTML = renderAdminNodesSection(nodeList); break;
+      case "members": sectionHTML = renderAdminMembersSection(memberList, meta); break;
+      case "security": sectionHTML = renderAdminSecuritySection(); break;
+    }
     return `
       <main class="obs-page obs-page--admin">
-        <section class="admin-hub">
-          ${renderAdminSubnav(section, list, nodeList, memberList, alertMap)}
-          <div class="admin-stage">
-            ${renderAdminAlertSection(section, alertMap)}
-            ${renderAdminChecksSection(section, list, nodeList)}
-            ${renderAdminNodesSection(section, nodeList)}
-            ${renderAdminMembersSection(section, memberList, meta)}
-            ${renderAdminSecuritySection(section)}
-          </div>
-        </section>
+        <div class="admin-stage">
+          ${sectionHTML}
+        </div>
       </main>
     `;
   }
@@ -1734,73 +1724,9 @@
     return allowed.includes(String(value || "")) ? String(value || "") : "alerts";
   }
 
-  function countEnabledAdminAlerts(alerts) {
-    return ["telegram", "smtp", "webhook"].filter((channel) => Boolean(alerts && alerts[channel] && alerts[channel].enabled)).length;
-  }
-
-  function renderAdminSubnav(section, checks, nodes, members, alerts) {
-    const sections = [
-      {
-        id: "alerts",
-        label: "Alert Channels",
-        title: "渠道配置与测试",
-        detail: countEnabledAdminAlerts(alerts) + " 个当前启用"
-      },
-      {
-        id: "checks",
-        label: "Runtime Checks",
-        title: "运行时检测项",
-        detail: String(Array.isArray(checks) ? checks.length : 0) + " 条规则"
-      },
-      {
-        id: "nodes",
-        label: "Node Names",
-        title: "节点显示名称",
-        detail: String(Array.isArray(nodes) ? nodes.length : 0) + " 个节点"
-      },
-      {
-        id: "members",
-        label: "Cluster Membership",
-        title: "成员与角色",
-        detail: String(Array.isArray(members) ? members.length : 0) + " 个成员"
-      },
-      {
-        id: "security",
-        label: "Security",
-        title: "会话与密码",
-        detail: "管理员入口"
-      }
-    ];
-
+  function renderAdminChecksSection(list, nodeList) {
     return `
-      <aside class="obs-section admin-panel admin-subnav">
-        <div class="obs-section__head">
-          <div>
-            <p class="obs-section__eyebrow">Admin Console</p>
-            <h2>把后台拆成清晰的工作区</h2>
-          </div>
-          <p>每个分区只负责一类动作，避免把渠道、检测项、节点名称和成员管理堆在一整页里。</p>
-        </div>
-        <div class="admin-subnav__list">
-          ${sections.map((item) => `
-            <button
-              type="button"
-              class="admin-subnav__item${item.id === section ? " is-active" : ""}"
-              data-admin-section-trigger="${escapeHTML(item.id)}"
-            >
-              <span>${escapeHTML(item.label)}</span>
-              <strong>${escapeHTML(item.title)}</strong>
-              <small>${escapeHTML(item.detail)}</small>
-            </button>
-          `).join("")}
-        </div>
-      </aside>
-    `;
-  }
-
-  function renderAdminChecksSection(section, list, nodeList) {
-    return `
-      <section class="admin-stage__section" data-admin-section-panel="checks"${section === "checks" ? "" : " hidden"}>
+      <section class="admin-stage__section">
         <section class="obs-split admin-content">
           <article class="obs-section admin-panel">
             <div class="obs-section__head">
@@ -1945,9 +1871,9 @@
     `;
   }
 
-  function renderAdminNodesSection(section, nodeList) {
+  function renderAdminNodesSection(nodeList) {
     return `
-      <section class="admin-stage__section" data-admin-section-panel="nodes"${section === "nodes" ? "" : " hidden"}>
+      <section class="admin-stage__section">
         <section class="obs-split admin-content">
           <article class="obs-section admin-panel">
             <div class="obs-section__head">
@@ -1998,9 +1924,9 @@
     `;
   }
 
-  function renderAdminMembersSection(section, memberList, meta) {
+  function renderAdminMembersSection(memberList, meta) {
     return `
-      <section class="admin-stage__section" data-admin-section-panel="members"${section === "members" ? "" : " hidden"}>
+      <section class="admin-stage__section">
         <section class="obs-section admin-panel">
           <div class="obs-section__head">
             <div>
@@ -2020,9 +1946,9 @@
     `;
   }
 
-  function renderAdminSecuritySection(section) {
+  function renderAdminSecuritySection() {
     return `
-      <section class="admin-stage__section" data-admin-section-panel="security"${section === "security" ? "" : " hidden"}>
+      <section class="admin-stage__section">
         <section class="obs-split admin-top">
           <article class="obs-section admin-panel">
             <div class="obs-section__head">
@@ -2064,10 +1990,10 @@
     `;
   }
 
-  function renderAdminAlertSection(section, alerts) {
+  function renderAdminAlertSection(alerts) {
     const alertMap = alerts && typeof alerts === "object" ? alerts : {};
     return `
-      <section class="admin-stage__section" data-admin-section-panel="alerts"${section === "alerts" ? "" : " hidden"}>
+      <section class="admin-stage__section">
         <article class="obs-section admin-panel">
           <div class="obs-section__head">
             <div>
@@ -2813,6 +2739,7 @@
               : ""}
             ${renderObsidianNavLink("/events", "warning", "Incidents", view.page === "events")}
             ${renderObsidianNavLink("/admin", activeMeta.is_admin ? "shield_lock" : "login", adminLabel, view.page === "admin")}
+            ${view.page === "admin" && activeMeta.is_admin ? renderAdminSidebarSubnav(normalizeAdminSection(activeAdminSection)) : ""}
           </nav>
 
           <div class="obs-sidebar__footer">
@@ -3619,6 +3546,26 @@
         ${renderIcon(iconName, active)}
         <span>${escapeHTML(label)}</span>
       </a>
+    `;
+  }
+
+  function renderAdminSidebarSubnav(activeSection) {
+    const items = [
+      { id: "alerts", icon: "notifications", label: "Alert Channels" },
+      { id: "checks", icon: "monitor_heart", label: "Runtime Checks" },
+      { id: "nodes", icon: "dns", label: "Node Names" },
+      { id: "members", icon: "group", label: "Cluster Members" },
+      { id: "security", icon: "lock", label: "Security" }
+    ];
+    return `
+      <div class="obs-sidebar__subnav">
+        ${items.map((item) => `
+          <a href="/admin/${escapeHTML(item.id)}" data-link class="obs-nav-sub-item${item.id === activeSection ? " is-active" : ""}">
+            ${renderIcon(item.icon, item.id === activeSection)}
+            <span>${escapeHTML(item.label)}</span>
+          </a>
+        `).join("")}
+      </div>
     `;
   }
 
@@ -4781,20 +4728,6 @@
       field.hidden = !isVisible;
     });
     syncAdminSelectMenus();
-  }
-
-  function syncAdminSections() {
-    const current = normalizeAdminSection(activeAdminSection);
-    document.querySelectorAll("[data-admin-section-trigger]").forEach((button) => {
-      const active = (button.dataset.adminSectionTrigger || "") === current;
-      button.classList.toggle("is-active", active);
-      button.setAttribute("aria-pressed", active ? "true" : "false");
-    });
-    document.querySelectorAll("[data-admin-section-panel]").forEach((panel) => {
-      const active = (panel.dataset.adminSectionPanel || "") === current;
-      panel.hidden = !active;
-      panel.classList.toggle("is-active", active);
-    });
   }
 
   function syncAdminRowSelection() {
